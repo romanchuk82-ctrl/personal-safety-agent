@@ -863,86 +863,6 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "priority": 2
   },
   {
-    "username": "vitaliyklychko",
-    "title": "Віталій Кличко (Мер Києва / Оперативно)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.95,
-    "priority": 1
-  },
-  {
-    "username": "kievreal1",
-    "title": "Київ Інфо (Радар столиці & БпЛА)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.9,
-    "priority": 1
-  },
-  {
-    "username": "kiev_alerts",
-    "title": "Київська ОВА / Руслан Кравченко",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.95,
-    "priority": 1
-  },
-  {
-    "username": "boryspil_radar",
-    "title": "Бориспіль Радар (Аеропорт & Східний коридор)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.9,
-    "priority": 1
-  },
-  {
-    "username": "boryspil_live",
-    "title": "Бориспіль Оперативний / Чубинське / Гора",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 1
-  },
-  {
-    "username": "brovary_radar",
-    "title": "Бровари Радар ППО",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 1
-  },
-  {
-    "username": "bucha_live",
-    "title": "Буча / Ірпінь / Гостомель Монітор",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2
-  },
-  {
-    "username": "obukhiv_radar",
-    "title": "Обухів / Українка / Трипілля Радар",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 1
-  },
-  {
-    "username": "bila_tserkva_radar",
-    "title": "Біла Церква Радар",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2
-  },
-  {
-    "username": "vasylkiv_aviation",
-    "title": "Васильків / Фастів Авіаційний сектор",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 1
-  },
-  {
     "username": "crimeanwind",
     "title": "Кримський вітер (Пуски ракет & Шахедів з Криму)",
     "category": "strategic_launch",
@@ -1027,14 +947,6 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "title": "Труха Харьков (С-300 / КАБ)",
     "category": "osint_network",
     "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1
-  },
-  {
-    "username": "truha_kyiv",
-    "title": "Труха Киев / Борисполь",
-    "category": "osint_network",
-    "region": "Київська область",
     "weight": 0.88,
     "priority": 1
   },
@@ -1167,22 +1079,6 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "priority": 1
   },
   {
-    "username": "kyivmonitoring1",
-    "title": "Київ Моніторинг / Радар (Київщина, Бориспіль)",
-    "category": "tactical_north",
-    "region": "Київська область",
-    "weight": 0.92,
-    "priority": 1
-  },
-  {
-    "username": "monitoring_kiev",
-    "title": "Моніторинг Київ (ППО та загрози)",
-    "category": "tactical_north",
-    "region": "Київська область",
-    "weight": 0.9,
-    "priority": 2
-  },
-  {
     "username": "Tsaplienko",
     "title": "Андрій Цаплієнко (Оперативні воєнні сповіщення)",
     "category": "osint_network",
@@ -1212,14 +1108,6 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "osint_network",
     "region": "Вся Україна",
     "weight": 0.89,
-    "priority": 2
-  },
-  {
-    "username": "kievinfo_kyiv",
-    "title": "Київ Інфо (Київ та Бориспіль)",
-    "category": "tactical_north",
-    "region": "Київська область",
-    "weight": 0.9,
     "priority": 2
   },
   {
@@ -1301,6 +1189,230 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Вся Україна",
     "weight": 0.92,
     "priority": 2
+  },
+  {
+    "username": "kmda_official",
+    "title": "КМДА (Офіційний портал Києва)",
+    "category": "military_official",
+    "region": "Київська область",
+    "weight": 0.98,
+    "priority": 1
+  },
+  {
+    "username": "VA_Kyiv",
+    "title": "КМВА (Сергій Попко / Повітряні загрози Києва)",
+    "category": "military_official",
+    "region": "Київська область",
+    "weight": 0.98,
+    "priority": 1
+  },
+  {
+    "username": "gunpKyiv",
+    "title": "Поліція Києва (Оперативні патрулі)",
+    "category": "military_official",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 2
+  },
+  {
+    "username": "vitaliyklychko",
+    "title": "Віталій Кличко (Мер Києва / Оперативно)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.95,
+    "priority": 1
+  },
+  {
+    "username": "kievreal1",
+    "title": "Київ Інфо (Радар столиці & БпЛА)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "radar_kyiv",
+    "title": "Радар Київ (ППО, Шахеди & Ракети)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "kyivoperat",
+    "title": "Київ Оперативний (Тривоги та загрози)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "kievnow",
+    "title": "Київ Зараз (Екстрені сповіщення)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "dtp_kiev",
+    "title": "ДТП та Надзвичайні події Києва",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "tlk_kyiv",
+    "title": "ТЛК Київ (Тривога / Локації / Курси)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "kiev_alerts",
+    "title": "Київська ОВА / Руслан Кравченко",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.95,
+    "priority": 1
+  },
+  {
+    "username": "kyivmonitoring1",
+    "title": "Київ Моніторинг / Радар (Київщина, Бориспіль)",
+    "category": "tactical_north",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "obolon_live",
+    "title": "Оболонь / Куренівка / Мінський Радар",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "troeshchina_live",
+    "title": "Деснянський / Троєщина Live",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "poznyaki_live",
+    "title": "Дарниця / Позняки / Осокорки Live",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "svyatoshin_live",
+    "title": "Святошин / Нивки / Академмістечко Live",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "pechersk_monitor",
+    "title": "Печерськ / Центр / Поділ Монітор",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "solomianka_radar",
+    "title": "Солом'янка / Жуляни Радар",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "vyshhorod_live",
+    "title": "Вишгород / ГЕС / Північний сектор",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "boryspil_radar",
+    "title": "Бориспіль Радар (Аеропорт & Східний коридор)",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "boryspil_live",
+    "title": "Бориспіль Оперативний / Чубинське / Гора",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "brovary_radar",
+    "title": "Бровари Радар ППО",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "bucha_live",
+    "title": "Буча / Ірпінь / Гостомель Монітор",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "obukhiv_radar",
+    "title": "Обухів / Українка / Трипілля Радар",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "vasylkiv_aviation",
+    "title": "Васильків / Фастів Авіаційний сектор",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "bila_tserkva_radar",
+    "title": "Біла Церква Радар",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "pereyaslav_radar",
+    "title": "Переяслав / Яготин / Березань Радар",
+    "category": "tactical_center",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 2
+  },
+  {
+    "username": "truha_kyiv",
+    "title": "Труха Киев / Борисполь",
+    "category": "osint_network",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 1
   }
 ];
 
