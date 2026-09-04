@@ -277,7 +277,7 @@ export default function HomePage() {
     try {
       const [alertsRes, tgRes] = await Promise.all([
         fetchActiveAlerts(),
-        fetchAllTelegramFeeds(currentLoc.oblast, 36, customChannels)
+        fetchAllTelegramFeeds(currentLoc.oblast, 20, customChannels)
       ]);
 
       const result = evaluateLocalSecurity(

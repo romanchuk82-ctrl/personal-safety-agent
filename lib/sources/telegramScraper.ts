@@ -1484,12 +1484,15 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
   }
 
   const targetUrl = 'https://t.me/s/' + channel.username;
-  const fetchUrls = [
-    targetUrl,
-    'https://r.jina.ai/https://t.me/s/' + channel.username,
-    'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl),
-    'https://corsproxy.io/?url=' + encodeURIComponent(targetUrl)
-  ];
+  const isBrowser = typeof window !== 'undefined';
+  const fetchUrls: string[] = [];
+
+  if (!isBrowser) {
+    fetchUrls.push(targetUrl);
+  }
+  fetchUrls.push(`https://corsproxy.org/?${encodeURIComponent(targetUrl)}`);
+  fetchUrls.push(`https://proxy.cors.sh/${targetUrl}`);
+  fetchUrls.push(`https://r.jina.ai/${targetUrl}`);
 
   for (const url of fetchUrls) {
     try {
