@@ -44,7 +44,7 @@ import {
   Megaphone,
   Volume1
 } from 'lucide-react';
-import { fetchActiveAlerts } from '@/lib/sources/alertsInUa';
+import { fetchActiveAlerts, RawAlert } from '@/lib/sources/alertsInUa';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState } from '@/lib/matcher';
 import { findNearestLocation } from '@/lib/gazetteer';
@@ -94,6 +94,7 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
+  const [officialAlerts, setOfficialAlerts] = useState<RawAlert[]>([]);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
@@ -251,6 +252,7 @@ export default function HomePage() {
       );
 
       setEvaluation(result);
+      setOfficialAlerts(alertsRes.alerts || []);
       setLastCheckTime(new Date());
       setSecondsSinceCheck(0);
 
@@ -683,6 +685,7 @@ export default function HomePage() {
               userLocation={location}
               radiusKm={radiusKm}
               threats={radarThreats}
+              officialAlerts={officialAlerts}
               selectedThreat={selectedThreat}
               onSelectThreat={setSelectedThreat}
               isActive={isActive}

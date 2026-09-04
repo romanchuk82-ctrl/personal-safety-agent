@@ -2,7 +2,28 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ThreatEvent } from '@/lib/matcher';
-import { Navigation, ZoomIn, ZoomOut, Compass, Shield, AlertTriangle, Crosshair, Layers, MapPin, Radio, ExternalLink, X, CheckCircle, Info, Flame, Clock } from 'lucide-react';
+import { RawAlert } from '@/lib/sources/alertsInUa';
+import { UKRAINE_REGIONS_GEOJSON } from '@/lib/ukraineRegions';
+import {
+  Navigation,
+  ZoomIn,
+  ZoomOut,
+  Compass,
+  Shield,
+  AlertTriangle,
+  Crosshair,
+  Layers,
+  MapPin,
+  Radio,
+  ExternalLink,
+  X,
+  CheckCircle,
+  Info,
+  Flame,
+  Clock,
+  Bell,
+  BellOff
+} from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 interface SafetyMapProps {
@@ -15,6 +36,7 @@ interface SafetyMapProps {
   } | null;
   radiusKm: number;
   threats: ThreatEvent[];
+  officialAlerts?: RawAlert[];
   selectedThreat: ThreatEvent | null;
   onSelectThreat: (threat: ThreatEvent | null) => void;
   isActive: boolean;
@@ -69,6 +91,7 @@ export default function SafetyMap({
   userLocation,
   radiusKm,
   threats,
+  officialAlerts = [],
   selectedThreat,
   onSelectThreat,
   isActive,
@@ -81,13 +104,15 @@ export default function SafetyMap({
   const radiusCircleRef = useRef<any>(null);
   const flugerZonesRef = useRef<any[]>([]);
   const threatLayersRef = useRef<any[]>([]);
+  const officialAlertsLayerRef = useRef<any>(null);
   const userInteractedRef = useRef<boolean>(false);
   const LRef = useRef<any>(null);
 
   const [isMapReady, setIsMapReady] = useState(false);
+  const [showOfficialAlerts, setShowOfficialAlerts] = useState<boolean>(true);
   const [currentZoom, setCurrentZoom] = useState(11);
 
-  // 1. Initialize Leaflet Map
+  // 1. Initialize Leaflet Map (Using Clean ESRI Dark Gray Canvas without any watermarks)
   useEffect(() => {
     let isMounted = true;
 
@@ -117,10 +142,18 @@ export default function SafetyMap({
         bounceAtZoomLimits: true
       });
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        subdomains: 'abcd',
-        maxZoom: 19,
+      // BASE DARK CANVAS: 100% Free, Official ESRI World Dark Gray without watermarks or API key requirements
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 16,
         minZoom: 5,
+        attribution: '&copy; Esri, HERE, OpenStreetMap'
+      }).addTo(map);
+
+      // REFERENCE LABELS: Clean overlay for road labels, town names and boundaries
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 16,
+        minZoom: 5,
+        opacity: 0.8
       }).addTo(map);
 
       map.on('dragstart', () => {
@@ -150,7 +183,71 @@ export default function SafetyMap({
     };
   }, []);
 
-  // 2. Update User Position & Monitoring Radius Circle
+  // 2. Render Official Air Raid Alerts Layer (Separate Ambient Situational Layer)
+  useEffect(() => {
+    if (!isMapReady || !mapInstanceRef.current || !LRef.current) return;
+    const L = LRef.current;
+    const map = mapInstanceRef.current;
+
+    if (officialAlertsLayerRef.current) {
+      map.removeLayer(officialAlertsLayerRef.current);
+      officialAlertsLayerRef.current = null;
+    }
+
+    if (!showOfficialAlerts) return;
+
+    // Extract active alert locations
+    const activeAlerts = (officialAlerts || []).filter(a => !a.finished_at);
+    const alertNames = new Set(
+      activeAlerts.map(a => a.location_title.toLowerCase().trim())
+    );
+
+    const geoJsonLayer = L.geoJSON(UKRAINE_REGIONS_GEOJSON as any, {
+      style: (feature: any) => {
+        const regName = feature.properties.name.toLowerCase().trim();
+        const normName = feature.properties.normalizedName.toLowerCase().trim();
+
+        const isAlertActive = Array.from(alertNames).some(title => {
+          return title === regName ||
+                 title.includes(normName) ||
+                 (regName.includes('київ') && (title.includes('київ') || title.includes('київська'))) ||
+                 (regName.includes('запоріж') && title.includes('запоріж')) ||
+                 (regName.includes('дніпро') && title.includes('дніпро')) ||
+                 (regName.includes('харків') && title.includes('харків')) ||
+                 (regName.includes('одес') && title.includes('одес')) ||
+                 (regName.includes('миколаїв') && title.includes('миколаїв')) ||
+                 (regName.includes('сум') && title.includes('сум')) ||
+                 (regName.includes('чернігів') && title.includes('чернігів')) ||
+                 (regName.includes('полтав') && title.includes('полтав'));
+        });
+
+        if (isAlertActive) {
+          return {
+            fillColor: '#f43f5e',
+            fillOpacity: 0.10, // Delicate, ambient semi-transparent red tint (doesn't blind the map)
+            weight: 1.2,
+            color: '#f43f5e',
+            opacity: 0.55,
+            dashArray: '4, 4'
+          };
+        }
+
+        return {
+          fillColor: '#0f172a',
+          fillOpacity: 0.02,
+          weight: 0.5,
+          color: '#334155',
+          opacity: 0.2
+        };
+      },
+      interactive: false
+    });
+
+    geoJsonLayer.addTo(map);
+    officialAlertsLayerRef.current = geoJsonLayer;
+  }, [isMapReady, officialAlerts, showOfficialAlerts]);
+
+  // 3. Update User Position & Monitoring Radius Circle
   useEffect(() => {
     if (!isMapReady || !mapInstanceRef.current || !LRef.current || !userLocation) return;
     const L = LRef.current;
@@ -235,7 +332,7 @@ export default function SafetyMap({
     }
   }, [isMapReady, userLocation, radiusKm, isRed, isOrange]);
 
-  // 3. Render Threats: Exact Markers vs Honest Directional Sectors
+  // 4. Render Local Tactical Threats: Exact Markers vs Directional Sectors
   useEffect(() => {
     if (!isMapReady || !mapInstanceRef.current || !LRef.current || !userLocation) return;
     const L = LRef.current;
@@ -348,12 +445,13 @@ export default function SafetyMap({
   }, []);
 
   const activeThreatsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID').length;
+  const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
 
   return (
     <div className="relative w-full rounded-3xl overflow-hidden border border-[#1a2538] bg-[#070b14] shadow-2xl transition-all">
       {/* MAP TOP STATUS BAR */}
-      <div className="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between pointer-events-none">
-        <div className="pointer-events-auto bg-[#0c1220]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700/70 shadow-lg flex items-center gap-2 max-w-[70%] truncate">
+      <div className="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between gap-2 pointer-events-none">
+        <div className="pointer-events-auto bg-[#0c1220]/95 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700/70 shadow-lg flex items-center gap-2 max-w-[60%] truncate">
           <div className={'w-2 h-2 rounded-full ' + (isRed ? 'bg-red-500 animate-ping' : isOrange ? 'bg-amber-400' : isActive ? 'bg-emerald-400' : 'bg-slate-400')} />
           <span className="text-[11px] font-bold text-white truncate">
             {userLocation ? userLocation.name : 'Визначення позиції...'}
@@ -363,12 +461,21 @@ export default function SafetyMap({
           </span>
         </div>
 
-        {activeThreatsCount > 0 && (
-          <div className="pointer-events-auto bg-red-950/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-red-500/80 shadow-lg flex items-center gap-1.5 text-red-300 text-[11px] font-bold">
-            <AlertTriangle className="w-3.5 h-3.5 text-red-400 animate-bounce" />
-            <span>{activeThreatsCount} {activeThreatsCount === 1 ? 'ціль' : 'цілі'}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5 pointer-events-auto shrink-0">
+          {activeThreatsCount > 0 && (
+            <div className="bg-red-950/95 backdrop-blur-md px-2.5 py-1 rounded-full border border-red-500/80 shadow-lg flex items-center gap-1.5 text-red-300 text-[10px] font-bold animate-pulse">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              <span>{activeThreatsCount} {activeThreatsCount === 1 ? 'ціль' : 'цілі'}</span>
+            </div>
+          )}
+
+          {activeOfficialAlertsCount > 0 && (
+            <div className="bg-rose-950/85 backdrop-blur-md px-2 py-1 rounded-full border border-rose-800/60 shadow-md flex items-center gap-1 text-rose-300 text-[10px] font-bold">
+              <Bell className="w-3 h-3 text-rose-400" />
+              <span>{activeOfficialAlertsCount} тривог</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* LEAFLET MAP CANVAS */}
@@ -380,6 +487,18 @@ export default function SafetyMap({
 
       {/* FLOATING MAP CONTROLS */}
       <div className="absolute bottom-3 right-3 z-[400] flex flex-col gap-1.5 pointer-events-auto">
+        <button
+          onClick={() => setShowOfficialAlerts(!showOfficialAlerts)}
+          className={'w-9 h-9 rounded-xl border shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95 ' + (
+            showOfficialAlerts
+              ? 'bg-rose-950/90 hover:bg-rose-900 border-rose-600/70 text-rose-300'
+              : 'bg-[#0e1626]/95 hover:bg-slate-800 border-slate-700/80 text-slate-400'
+          )}
+          title={showOfficialAlerts ? 'Приховати шар офіційних тривог' : 'Показати шар офіційних тривог'}
+        >
+          <Layers className="w-4 h-4" />
+        </button>
+
         <button
           onClick={handleRecenter}
           className="w-9 h-9 rounded-xl bg-[#0e1626]/95 hover:bg-blue-900/80 text-blue-400 hover:text-white border border-slate-700/80 shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95"
@@ -405,21 +524,27 @@ export default function SafetyMap({
         </button>
       </div>
 
-      {/* BOTTOM-LEFT LEGEND OVERLAY */}
+      {/* BOTTOM-LEFT COMPACT LEGEND OVERLAY */}
       <div className="absolute bottom-3 left-3 z-[400] pointer-events-none">
-        <div className="bg-[#0c1220]/90 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[10px] text-slate-300 flex items-center gap-2.5 font-medium shadow-md">
+        <div className="bg-[#0c1220]/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-800 text-[10px] text-slate-300 flex items-center gap-2.5 font-medium shadow-xl">
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shadow-sm"></span>
             <span>Ви</span>
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-0.5 border-t border-dashed border-blue-400 inline-block"></span>
+            <span className="w-2.5 h-0.5 border-t-2 border-dashed border-blue-400 inline-block"></span>
             <span>Зона {radiusKm} км</span>
           </span>
           {activeThreatsCount > 0 && (
-            <span className="flex items-center gap-1 text-red-400">
+            <span className="flex items-center gap-1 text-red-400 font-bold animate-pulse">
               <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
-              <span>Загроза (клік для деталей)</span>
+              <span>Локальна ціль</span>
+            </span>
+          )}
+          {showOfficialAlerts && activeOfficialAlertsCount > 0 && (
+            <span className="flex items-center gap-1 text-rose-400">
+              <span className="w-2 h-2 border border-dashed border-rose-500 bg-rose-500/20 rounded-xs inline-block"></span>
+              <span>Офіційна тривога</span>
             </span>
           )}
         </div>
