@@ -986,24 +986,29 @@ export async function fetchChannelMessages(
   }
 
   const cleanUser = channel.username.trim().replace(/^@/, '');
-  const targetUrl = 'https://t.me/s/' + cleanUser;
   const isBrowser = typeof window !== 'undefined';
-
-  const fetchUrls: string[] = [];
+  const targetUrl = 'https://t.me/s/' + cleanUser;
+  const fetchEndpoints: { url: string; headers?: Record<string, string> }[] = [];
 
   if (!isBrowser) {
-    fetchUrls.push(targetUrl);
+    fetchEndpoints.push({ url: targetUrl, headers: { 'Accept': 'text/html' } });
   }
-  fetchUrls.push('https://proxy.cors.sh/' + targetUrl);
-  fetchUrls.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl));
+  // Jina proxy with x-return-format: html provides high-speed, CORS-compliant HTML access
+  fetchEndpoints.push({
+    url: 'https://r.jina.ai/' + targetUrl,
+    headers: { 'x-return-format': 'html', 'Accept': 'text/html' }
+  });
+  fetchEndpoints.push({
+    url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl)
+  });
 
-  for (const url of fetchUrls) {
+  for (const ep of fetchEndpoints) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 4500);
+      const timeout = setTimeout(() => controller.abort(), 6000);
 
-      const res = await fetch(url, {
-        headers: {
+      const res = await fetch(ep.url, {
+        headers: ep.headers || {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
         signal: controller.signal
@@ -1119,10 +1124,17 @@ export async function fetchAllTelegramFeeds(
     ...selectedBatch
   ];
 
-  // Concurrently fetch this cycle's channels
-  const results = await Promise.allSettled(
-    channelsToQueryThisCycle.map(ch => fetchChannelMessages(ch))
-  );
+  // Concurrently fetch this cycle's channels with concurrency throttling (chunks of 4)
+  const results: PromiseSettledResult<{ messages: TelegramMessage[]; error?: string }>[] = [];
+  const CONCURRENCY = 4;
+  for (let i = 0; i < channelsToQueryThisCycle.length; i += CONCURRENCY) {
+    const chunk = channelsToQueryThisCycle.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch)));
+    results.push(...chunkResults);
+    if (i + CONCURRENCY < channelsToQueryThisCycle.length) {
+      await new Promise(r => setTimeout(r, 60));
+    }
+  }
 
   results.forEach((res, idx) => {
     const ch = channelsToQueryThisCycle[idx];
