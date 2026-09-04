@@ -165,3 +165,13 @@ export function speakUkrainian(text: string, onStart?: () => void, onEnd?: () =>
     return false;
   }
 }
+
+
+export function stopAllAudio(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  } catch (e) {}
+}
