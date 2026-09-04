@@ -23,29 +23,34 @@ export interface ThreatClassification {
 
 /**
  * Returns conservative Time-To-Live (TTL) in minutes for each threat category
- * without receiving fresh confirmation.
+ * without receiving fresh confirmation. Moving targets (UAV, missiles, ballistic)
+ * have short operational TTL to prevent ghost threats.
  */
-export function getThreatTtlMinutes(category: ThreatCategory): number {
+export function getThreatTtlMinutes(category: ThreatCategory, text?: string): number {
   switch (category) {
     case 'BALLISTIC':
-      return 10; // Балістика / Швидкісна ціль: 10 хв
-    case 'KAB':
-      return 15; // Керована авіабомба (КАБ/ФАБ): 15 хв
+      return 5; // Балістика / Швидкісна гіперзвукова ціль: 5 хв (політ триває 2-4 хв)
     case 'CRUISE_MISSILE':
-      return 15; // Крилата ракета: 15 хв
+      return 7; // Крилата ракета: 7 хв (при швидкості 800 км/год за 7 хв долає ~90 км)
+    case 'KAB':
+      return 7; // Керована авіабомба (КАБ/ФАБ): 7 хв (планування 3-7 хв)
     case 'UAV_STRIKE':
-      return 20; // Ударний / Реактивний БпЛА: 20 хв
+      // Реактивний або високошвидкісний дрон: коротший TTL
+      if (text && /реактивн|швидкісн|ракета-дрон/i.test(text)) {
+        return 6;
+      }
+      return 8; // Ударний БпЛА (Шахед): 8 хв operational TTL без нового підтвердження
     case 'UAV_RECON':
-      return 20; // Розвідувальний БпЛА: 20 хв
+      return 8; // Розвідувальний БпЛА: 8 хв
     case 'EXPLOSION':
-      return 12; // Зафіксовано вибух: 12 хв
+      return 7; // Зафіксовано вибух / робота ППО: 7 хв
     case 'ARTILLERY':
-      return 15; // Артобстріл / РСЗВ: 15 хв
+      return 10; // Артобстріл / РСЗВ: 10 хв
     case 'ALL_CLEAR':
-      return 12; // Відбій / Чисто: 12 хв
+      return 0; // Відбій / Дорозвідка / Знищено: 0 хв (очищається одразу)
     case 'GENERAL_AIR_RAID':
     default:
-      return 15; // Загальна тривога: 15 хв
+      return 15; // Загальна повітряна тривога: 15 хв
   }
 }
 
@@ -53,27 +58,55 @@ export function classifyThreat(text: string): ThreatClassification {
   const normalized = text.toLowerCase();
   const matchedKeywords: string[] = [];
 
-  // Check for ALL CLEAR first
+  // Active incoming intent check: prevents treating "Шахед на Васильків, попередній збито" as pure all-clear
+  const hasIncomingMotion = /(?:курс(?:ом)?\s+на|в\s+бік|у\s+бік|рухається|наближається|підлітає|зафіксовано\s+пуск|пуски\s+каб|пуски\s+ракет|летить\s+на|прямує)/iu.test(normalized);
+
+  // Check for ALL CLEAR, destruction, or exit signals first
   const allClearKeywords = [
-    'відбій', 'отбой', 'дорозвідка', 'чисто', 'локаційно втрачено',
-    'всі цілі знищено', 'цілей немає', 'без загроз', 'загроза минула',
-    'попередньо чисто', 'по цілях мінус', 'всі мінус', 'по шахедах мінус'
+    'відбій', 'отбой', 'дорозвідка', 'чисто', 'локаційно втрачено', 'втрачено з радарів',
+    'всі цілі знищено', 'всі цілі збито', 'ціль знищено', 'цілі знищено', 'ціль збито', 'цілі збито',
+    'шахед знищено', 'шахеда знищено', 'шахеди знищено', 'шахед збито', 'шахеда збито', 'шахеди збито',
+    'збито шахед', 'збито ракету', 'збито бпла', 'збито ціль', 'збили шахед', 'збили ціль',
+    'ракета збита', 'ракету збито', 'ракети збито', 'ракети знищено', 'збиття цілі', 'збиття ракети', 'збиття шахеда',
+    'цілей немає', 'без загроз', 'загроза минула', 'попередньо чисто',
+    'по цілях мінус', 'всі мінус', 'по шахедах мінус', 'мінус шахед', 'мінус ціль',
+    'вийшов з', 'вийшла з', 'вийшли з', 'покинув', 'покинула', 'покинули',
+    'вийшов за межі', 'вийшла за межі', 'вийшли за межі',
+    'перелетів у', 'перелетіла у', 'перелетіли у'
   ];
+
   for (const kw of allClearKeywords) {
-    if (normalized.includes(kw)) {
+    if (normalized.includes(kw) && !hasIncomingMotion) {
       matchedKeywords.push(kw);
       return {
         category: 'ALL_CLEAR',
-        categoryNameUk: 'Відбій / Дорозвідка',
+        categoryNameUk: 'Відбій / Знищено / Чисто',
         severity: 'INFO',
         isTacticalThreat: false,
         directionKeywords: [],
         isAllClear: true,
         requiresImmediateShelter: false,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('ALL_CLEAR'),
+        ttlMinutes: getThreatTtlMinutes('ALL_CLEAR', normalized),
       };
     }
+  }
+
+  // Standalone clear/destruction keywords if not describing a fresh active launch
+  const standaloneClearRx = /(?:^|\s|\b)(?:збито|знищено|збили|ліквідовано|приземлили|перехоплено)(?:$|\s|\b|[!.,])/iu;
+  if (standaloneClearRx.test(normalized) && !hasIncomingMotion) {
+    matchedKeywords.push('збито/знищено');
+    return {
+      category: 'ALL_CLEAR',
+      categoryNameUk: 'Ціль знищено / збито',
+      severity: 'INFO',
+      isTacticalThreat: false,
+      directionKeywords: [],
+      isAllClear: true,
+      requiresImmediateShelter: false,
+      rawKeywordsMatched: matchedKeywords,
+      ttlMinutes: getThreatTtlMinutes('ALL_CLEAR', normalized),
+    };
   }
 
   // Direction keywords
@@ -116,7 +149,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('KAB'),
+        ttlMinutes: getThreatTtlMinutes('KAB', normalized),
       };
     }
   }
@@ -139,7 +172,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('BALLISTIC'),
+        ttlMinutes: getThreatTtlMinutes('BALLISTIC', normalized),
       };
     }
   }
@@ -162,7 +195,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('CRUISE_MISSILE'),
+        ttlMinutes: getThreatTtlMinutes('CRUISE_MISSILE', normalized),
       };
     }
   }
@@ -188,7 +221,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('UAV_STRIKE'),
+        ttlMinutes: getThreatTtlMinutes('UAV_STRIKE', normalized),
       };
     }
   }
@@ -206,7 +239,7 @@ export function classifyThreat(text: string): ThreatClassification {
       isAllClear: false,
       requiresImmediateShelter: true,
       rawKeywordsMatched: matchedKeywords,
-      ttlMinutes: getThreatTtlMinutes('UAV_STRIKE'),
+      ttlMinutes: getThreatTtlMinutes('UAV_STRIKE', normalized),
     };
   }
 
@@ -227,7 +260,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('EXPLOSION'),
+        ttlMinutes: getThreatTtlMinutes('EXPLOSION', normalized),
       };
     }
   }
@@ -246,7 +279,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('ARTILLERY'),
+        ttlMinutes: getThreatTtlMinutes('ARTILLERY', normalized),
       };
     }
   }
@@ -270,7 +303,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
-        ttlMinutes: getThreatTtlMinutes('UAV_STRIKE'),
+        ttlMinutes: getThreatTtlMinutes('UAV_STRIKE', normalized),
       };
     }
   }
@@ -287,7 +320,7 @@ export function classifyThreat(text: string): ThreatClassification {
       isAllClear: false,
       requiresImmediateShelter: false,
       rawKeywordsMatched: matchedKeywords,
-      ttlMinutes: getThreatTtlMinutes('UAV_STRIKE'),
+      ttlMinutes: getThreatTtlMinutes('UAV_STRIKE', normalized),
     };
   }
 
@@ -301,6 +334,6 @@ export function classifyThreat(text: string): ThreatClassification {
     isAllClear: false,
     requiresImmediateShelter: false,
     rawKeywordsMatched: ['загальна тривога'],
-    ttlMinutes: getThreatTtlMinutes('GENERAL_AIR_RAID'),
+    ttlMinutes: getThreatTtlMinutes('GENERAL_AIR_RAID', normalized),
   };
 }

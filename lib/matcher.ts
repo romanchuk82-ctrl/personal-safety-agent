@@ -84,6 +84,7 @@ export interface SecurityEvaluationResult {
   observationsList: ThreatEvent[];
   confirmedThreatsList: ThreatEvent[];
   outsideZoneObservations: ThreatEvent[];
+  historyEvents: ThreatEvent[];
   allClearDetected: boolean;
   userNearestKnownLocation: string;
   userOblast: string;
@@ -293,9 +294,10 @@ export function evaluateLocalSecurity(
     // Determine lifecycle status based on category TTL and explicit clear signals
     let status: EventStatus = 'active';
     let statusBadgeUk = 'Активна ціль';
+    const gracePeriodMs = 4 * 60 * 1000;
 
     if (ageFromLastConfirmMs > ttlMs) {
-      if (ageFromLastConfirmMs > ttlMs + (5 * 60 * 1000)) {
+      if (ageFromLastConfirmMs > ttlMs + gracePeriodMs) {
         status = 'cleared';
         statusBadgeUk = 'Загроза минула (Вичерпано TTL)';
       } else {
@@ -312,12 +314,7 @@ export function evaluateLocalSecurity(
         let locStatusBadgeUk = statusBadgeUk;
         if (allClearLocations.has(loc.name.toLowerCase())) {
           locStatus = 'cleared';
-          locStatusBadgeUk = 'Відбій у секторі';
-        }
-
-        // If cleared and completely expired beyond grace period, skip adding to threat list
-        if (locStatus === 'cleared' && ageFromLastConfirmMs > ttlMs) {
-          continue;
+          locStatusBadgeUk = 'Відбій / Знищено у секторі';
         }
 
         const dist = calculateDistanceKm(userLat, userLng, loc.lat, loc.lng);
@@ -466,10 +463,6 @@ export function evaluateLocalSecurity(
             regStatusBadgeUk = 'Відбій по області';
           }
 
-          if (regStatus === 'cleared' && ageFromLastConfirmMs > ttlMs) {
-            continue;
-          }
-
           const bearing = calculateBearingDegrees(userLat, userLng, zone.centerLat, zone.centerLng);
           const sector = getBearingSectorUk(bearing);
 
@@ -537,13 +530,66 @@ export function evaluateLocalSecurity(
     }
   }
 
-  // 3. Separate Confirmed Threats vs Observations
-  const activeEvents = threatEvents.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
+  // 3. Deduplicate and merge events by location & category to refresh TTL & eliminate duplicates
+  const deduplicatedEventsMap = new Map<string, ThreatEvent>();
+  const gracePeriodMs = 4 * 60 * 1000;
+
+  for (const ev of threatEvents) {
+    const key = `${ev.category}_${ev.detectedLocation.toLowerCase()}`;
+    const existing = deduplicatedEventsMap.get(key);
+    if (!existing) {
+      deduplicatedEventsMap.set(key, { ...ev });
+    } else {
+      const existingLastTs = new Date(existing.lastConfirmedAt).getTime();
+      const incomingLastTs = new Date(ev.lastConfirmedAt).getTime();
+      const existingCreateTs = new Date(existing.createdAt).getTime();
+      const incomingCreateTs = new Date(ev.createdAt).getTime();
+
+      const latestConfirmedTs = Math.max(existingLastTs, incomingLastTs);
+      const earliestCreatedTs = Math.min(existingCreateTs, incomingCreateTs);
+      const latestAgeMs = Math.max(0, now - latestConfirmedTs);
+      const latestAgeMin = Math.max(0, Math.floor(latestAgeMs / 60000));
+      const effectiveTtlMs = ev.ttlMinutes * 60 * 1000;
+
+      let mergedStatus: EventStatus = 'active';
+      let mergedBadgeUk = 'Активна ціль';
+
+      if (existing.status === 'cleared' || ev.status === 'cleared') {
+        mergedStatus = 'cleared';
+        mergedBadgeUk = 'Відбій / Знищено у секторі';
+      } else if (latestAgeMs > effectiveTtlMs) {
+        if (latestAgeMs > effectiveTtlMs + gracePeriodMs) {
+          mergedStatus = 'cleared';
+          mergedBadgeUk = 'Загроза минула (Вичерпано TTL)';
+        } else {
+          mergedStatus = 'stale';
+          mergedBadgeUk = 'Застаріла ціль (Очікується оновлення)';
+        }
+      }
+
+      existing.createdAt = new Date(earliestCreatedTs).toISOString();
+      existing.lastConfirmedAt = new Date(latestConfirmedTs).toISOString();
+      existing.ageMinutes = latestAgeMin;
+      existing.status = mergedStatus;
+      existing.statusBadgeUk = mergedBadgeUk;
+      existing.sourceCount += ev.sourceCount;
+      existing.repostCount += ev.repostCount;
+      existing.sourcesList = [...existing.sourcesList, ...(ev.sourcesList || [])];
+      existing.sourceSummaryText = `${existing.sourceCount} джерел / оновлено`;
+      existing.requiresImmediateShelter = mergedStatus === 'active' && (existing.requiresImmediateShelter || ev.requiresImmediateShelter);
+    }
+  }
+
+  const finalThreatEvents = Array.from(deduplicatedEventsMap.values());
+
+  // 4. Separate Confirmed Threats vs Observations (STRICTLY ONLY ACTIVE THREATS)
+  const activeEvents = finalThreatEvents.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
+  const historyEvents = finalThreatEvents.filter(t => (t.status === 'stale' || t.status === 'cleared') && t.category !== 'GENERAL_AIR_RAID');
   const confirmedThreatsList = activeEvents.filter(t => t.eventType === 'CONFIRMED_THREAT' && t.isWithinRadius);
   const observationsList = activeEvents.filter(t => t.eventType === 'OBSERVATION' || !t.isWithinRadius);
   const outsideZoneObservations = activeEvents.filter(t => t.isSurroundingObservation || (!t.isWithinRadius && t.distanceKm !== null && t.distanceKm <= 75));
 
-  // 4. Determine Overall Security State (Strictly considering ONLY active threats in local radius)
+  // 5. Determine Overall Security State (Strictly considering ONLY active threats in local radius)
   let overallState: SecurityState = 'GREEN';
   let stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
   let stateDescriptionUk = 'Локальних загроз поблизу не виявлено. Джерела сканують ваш сектор.';
@@ -582,11 +628,12 @@ export function evaluateLocalSecurity(
     hasLocalThreat: overallState === 'RED',
     hasAttentionWarning: overallState === 'ORANGE',
     primaryThreat,
-    threatEvents,
+    threatEvents: finalThreatEvents,
     observationsList,
     confirmedThreatsList,
     outsideZoneObservations,
-    allClearDetected: threatEvents.some(t => t.category === 'ALL_CLEAR'),
+    historyEvents,
+    allClearDetected: finalThreatEvents.some(t => t.category === 'ALL_CLEAR'),
     userNearestKnownLocation: nearestUserLoc.location.name,
     userOblast: nearestUserLoc.location.oblast,
     totalSourcesEvaluated: telegramMessages.length,

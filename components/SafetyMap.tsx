@@ -44,6 +44,7 @@ interface SafetyMapProps {
   radiusKm: number;
   threats: ThreatEvent[];
   officialAlerts?: RawAlert[];
+  isUserUnderOfficialAlert?: boolean;
   selectedThreat: ThreatEvent | null;
   onSelectThreat: (threat: ThreatEvent | null) => void;
   onSelectMapLocation?: (lat: number, lng: number) => void;
@@ -101,6 +102,7 @@ export default function SafetyMap({
   radiusKm,
   threats,
   officialAlerts = [],
+  isUserUnderOfficialAlert = false,
   selectedThreat,
   onSelectThreat,
   onSelectMapLocation,
@@ -184,6 +186,13 @@ export default function SafetyMap({
         opacity: 0.8
       }).addTo(map);
 
+      // Dedicated pane for official alert polygons below vector overlays (z-index 350)
+      if (!map.getPane('officialAlertsPane')) {
+        const pane = map.createPane('officialAlertsPane');
+        pane.style.zIndex = '350';
+        pane.style.pointerEvents = 'none';
+      }
+
       map.on('dragstart', () => {
         userInteractedRef.current = true;
       });
@@ -226,46 +235,51 @@ export default function SafetyMap({
 
     // Extract active alert locations
     const activeAlerts = (officialAlerts || []).filter(a => !a.finished_at);
-    const alertNames = new Set(
-      activeAlerts.map(a => a.location_title.toLowerCase().trim())
-    );
 
     const geoJsonLayer = L.geoJSON(UKRAINE_REGIONS_GEOJSON as any, {
+      pane: 'officialAlertsPane',
       style: (feature: any) => {
-        const regName = feature.properties.name.toLowerCase().trim();
-        const normName = feature.properties.normalizedName.toLowerCase().trim();
+        const regName = (feature.properties.name || '').toLowerCase().trim();
+        const normName = (feature.properties.normalizedName || '').toLowerCase().trim();
+        const stem = normName.replace(/(ська|цька|зька|а)$/i, '').trim();
 
-        const isAlertActive = Array.from(alertNames).some(title => {
-          return title === regName ||
-                 title.includes(normName) ||
-                 (regName.includes('київ') && (title.includes('київ') || title.includes('київська'))) ||
-                 (regName.includes('запоріж') && title.includes('запоріж')) ||
-                 (regName.includes('дніпро') && title.includes('дніпро')) ||
-                 (regName.includes('харків') && title.includes('харків')) ||
-                 (regName.includes('одес') && title.includes('одес')) ||
-                 (regName.includes('миколаїв') && title.includes('миколаїв')) ||
-                 (regName.includes('сум') && title.includes('сум')) ||
-                 (regName.includes('чернігів') && title.includes('чернігів')) ||
-                 (regName.includes('полтав') && title.includes('полтав'));
+        const isAlertActive = activeAlerts.some(a => {
+          const title = (a.location_title || '').toLowerCase().trim();
+          const oblast = (a.location_oblast || '').toLowerCase().trim();
+
+          // Direct or substring match on title or oblast
+          if (title === regName || oblast === regName) return true;
+          if (title.includes(normName) || oblast.includes(normName)) return true;
+          if (stem.length >= 4 && (title.includes(stem) || oblast.includes(stem))) return true;
+
+          // Special case for Kyiv city ("м. Київ" or "Київ") matching Kyivska oblast
+          if (regName.includes('київ') && (title.includes('київ') || oblast.includes('київ'))) return true;
+
+          // Special case for Crimea / Sevastopol
+          if (regName.includes('крим') && (title.includes('крим') || oblast.includes('крим'))) return true;
+          if (regName.includes('севастополь') && (title.includes('севастополь') || oblast.includes('севастополь'))) return true;
+
+          return false;
         });
 
         if (isAlertActive) {
           return {
-            fillColor: '#f43f5e',
-            fillOpacity: 0.10, // Delicate, ambient semi-transparent red tint (doesn't blind the map)
-            weight: 1.2,
-            color: '#f43f5e',
-            opacity: 0.55,
-            dashArray: '4, 4'
+            fillColor: '#b91c1c', // Rich semi-transparent burgundy / crimson fill
+            fillOpacity: 0.28,   // High-contrast, clearly visible tint on dark map
+            weight: 2.0,         // Visible solid outline
+            color: '#ef4444',    // Bright red contour
+            opacity: 0.88,       // Clear visible border
+            dashArray: ''        // Solid line for clean boundary visibility
           };
         }
 
         return {
-          fillColor: '#0f172a',
-          fillOpacity: 0.02,
-          weight: 0.5,
+          fillColor: 'transparent',
+          fillOpacity: 0,
+          weight: 0.6,
           color: '#334155',
-          opacity: 0.2
+          opacity: 0.18,
+          dashArray: '2, 4'
         };
       },
       interactive: false
@@ -377,7 +391,7 @@ export default function SafetyMap({
     threatLayersRef.current.forEach(layer => map.removeLayer(layer));
     threatLayersRef.current = [];
 
-    const activeThreats = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
+    const activeThreats = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
 
     activeThreats.forEach((threat) => {
       const isConfirmed = threat.eventType === 'CONFIRMED_THREAT' || (threat.isWithinRadius && threat.requiresImmediateShelter);
@@ -501,9 +515,9 @@ export default function SafetyMap({
     mapInstanceRef.current.zoomOut();
   }, []);
 
-  const activeConfirmedThreatsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'CONFIRMED_THREAT' || (t.isWithinRadius && t.requiresImmediateShelter))).length;
-  const activeObservationsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'OBSERVATION' || !t.isWithinRadius)).length;
-  const activeThreatsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID').length;
+  const activeConfirmedThreatsCount = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'CONFIRMED_THREAT' || (t.isWithinRadius && t.requiresImmediateShelter))).length;
+  const activeObservationsCount = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'OBSERVATION' || !t.isWithinRadius)).length;
+  const activeThreatsCount = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID').length;
   const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
 
   return (
@@ -531,6 +545,14 @@ export default function SafetyMap({
         </div>
 
         <div className="flex items-center gap-1.5 pointer-events-auto shrink-0">
+          {/* COMPACT OFFICIAL ALERT BADGE ON MAP */}
+          {isUserUnderOfficialAlert && (
+            <div className="bg-rose-950/95 backdrop-blur-md px-2.5 py-1 rounded-full border border-rose-500/80 shadow-lg flex items-center gap-1.5 text-rose-300 text-[10px] font-bold animate-pulse">
+              <span>⚠</span>
+              <span>ОФІЦІЙНА ТРИВОГА</span>
+            </div>
+          )}
+
           {activeConfirmedThreatsCount > 0 && (
             <div className="bg-red-950/95 backdrop-blur-md px-2.5 py-1 rounded-full border border-red-500/80 shadow-lg flex items-center gap-1.5 text-red-300 text-[10px] font-bold animate-pulse">
               <AlertTriangle className="w-3.5 h-3.5 text-red-400" />

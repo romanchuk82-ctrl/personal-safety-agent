@@ -51,7 +51,7 @@ import {
   Edit3,
   AlertCircle
 } from 'lucide-react';
-import { fetchActiveAlerts, RawAlert } from '@/lib/sources/alertsInUa';
+import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert } from '@/lib/sources/alertsInUa';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
@@ -611,8 +611,13 @@ export default function HomePage() {
   const isLocationLocked = trustedLocation?.lockMode === 'LOCKED' || trustedLocation?.lockMode === 'MANUAL';
   const isLocationUnreliable = trustedLocation?.confidenceState === 'UNRELIABLE';
 
+  const isUnderOfficialAlert = isUserInOfficialAlert(trustedLocation?.oblast, trustedLocation?.name, officialAlerts);
+
   const radarThreats = (evaluation?.threatEvents || []).filter(
-    (t) => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.distanceKm === null || t.distanceKm <= 75)
+    (t) => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.distanceKm === null || t.distanceKm <= 75)
+  );
+  const historyThreats = (evaluation?.historyEvents || []).filter(
+    (t) => (t.status === 'stale' || t.status === 'cleared') && t.category !== 'GENERAL_AIR_RAID'
   );
 
   // Gazetteer search filter for location modal
@@ -812,6 +817,15 @@ export default function HomePage() {
                   <span className="text-emerald-400">🟢 СЕКТОР ЧИСТИЙ</span>
                 )}
               </h2>
+
+              {/* COMPACT OFFICIAL AIR RAID BADGE */}
+              {isUnderOfficialAlert && (
+                <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 text-rose-300 text-xs font-bold shadow-lg shadow-rose-950/40 animate-pulse">
+                  <span>⚠</span>
+                  <span>ОФІЦІЙНА ТРИВОГА</span>
+                  <span className="text-[10px] text-rose-400 font-mono">({trustedLocation?.oblast || 'Область'})</span>
+                </div>
+              )}
             </div>
             <div className={'p-3 rounded-2xl ' + (
               !isActive ? 'bg-slate-800 text-slate-400' :
@@ -833,6 +847,8 @@ export default function HomePage() {
               ? evaluation?.stateDescriptionUk || 'Ціль спостерігається в області / коридорі підльоту. Загрози для вашого мікрорайону наразі немає.'
               : isDegraded
               ? 'Дані застаріли або відсутній зв’язок із джерелами. Перевірте підключення до інтернету.'
+              : isUnderOfficialAlert
+              ? `В області оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
               : evaluation?.stateDescriptionUk || 'Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор у реальному часі.'}
           </p>
 
@@ -946,6 +962,7 @@ export default function HomePage() {
               radiusKm={radiusKm}
               threats={radarThreats}
               officialAlerts={officialAlerts}
+              isUserUnderOfficialAlert={isUnderOfficialAlert}
               selectedThreat={selectedThreat}
               onSelectThreat={setSelectedThreat}
               onSelectMapLocation={(lat, lng) => handleSelectManualLocation(lat, lng)}
@@ -1035,6 +1052,27 @@ export default function HomePage() {
               })}
             </div>
           </div>
+        )}
+
+        {/* HISTORY THREATS (STALE / CLEARED) */}
+        {historyThreats.length > 0 && (
+          <details className="mb-4 bg-[#0a0e17] rounded-2xl border border-slate-800 p-3 text-xs">
+            <summary className="font-mono text-slate-400 uppercase tracking-wider cursor-pointer flex items-center justify-between select-none">
+              <span>📜 Історія цілей (застарілі / відбій) ({historyThreats.length})</span>
+              <span className="text-[10px] text-slate-500">розгорнути</span>
+            </summary>
+            <div className="mt-2.5 space-y-2">
+              {historyThreats.map((threat) => (
+                <div key={threat.id} className="p-2.5 rounded-xl bg-black/30 border border-slate-800/80 flex items-center justify-between text-slate-300">
+                  <div className="min-w-0 pr-2">
+                    <span className="font-bold text-xs block truncate text-slate-200">{threat.categoryNameUk}</span>
+                    <span className="text-[10px] text-slate-400 block truncate">📍 {threat.detectedLocation} ({threat.statusBadgeUk})</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500 shrink-0">{threat.ageMinutes} хв тому</span>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
 
         {/* SELECTED THREAT CARD */}
