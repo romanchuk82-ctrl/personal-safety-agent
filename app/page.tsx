@@ -75,6 +75,9 @@ export default function HomePage() {
   const [pushSubscribed, setPushSubscribed] = useState<boolean>(false);
   const [pushStatusMessage, setPushStatusMessage] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [customChannels, setCustomChannels] = useState<ChannelConfig[]>([]);
+  const [newChannelInput, setNewChannelInput] = useState<string>('');
+  const [channelAddMessage, setChannelAddMessage] = useState<string>('');
   const [sessionId, setSessionId] = useState<string>('');
 
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -88,6 +91,13 @@ export default function HomePage() {
       localStorage.setItem('psa_session_id', storedId);
     }
     setSessionId(storedId);
+
+    try {
+      const storedChannels = localStorage.getItem('psa_custom_channels');
+      if (storedChannels) {
+        setCustomChannels(JSON.parse(storedChannels));
+      }
+    } catch (e) {}
 
     const storedActive = localStorage.getItem('psa_is_active') === 'true';
     const storedLocation = localStorage.getItem('psa_location');
@@ -228,6 +238,50 @@ export default function HomePage() {
     }
   };
 
+  const handleAddCustomChannel = (rawName?: string) => {
+    const target = (rawName || newChannelInput).trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//, '');
+    if (!target) return;
+
+    if (customChannels.some((c) => c.username.toLowerCase() === target.toLowerCase()) ||
+        MONITORED_CHANNELS.some((c) => c.username.toLowerCase() === target.toLowerCase())) {
+      setChannelAddMessage(`Канал @${target} вже є у вашому моніторингу.`);
+      setTimeout(() => setChannelAddMessage(''), 3500);
+      setNewChannelInput('');
+      return;
+    }
+
+    const newConfig: ChannelConfig = {
+      username: target,
+      title: `@${target} (Користувацький канал)`,
+      category: 'user_custom',
+      region: location ? location.name : 'Вся Україна',
+      weight: 0.95,
+      priority: 1
+    };
+
+    const updated = [newConfig, ...customChannels];
+    setCustomChannels(updated);
+    try {
+      localStorage.setItem('psa_custom_channels', JSON.stringify(updated));
+    } catch (e) {}
+
+    setNewChannelInput('');
+    setChannelAddMessage(`Канал @${target} успішно додано до радару!`);
+    setTimeout(() => setChannelAddMessage(''), 3500);
+
+    if (location) {
+      performCheck(location);
+    }
+  };
+
+  const handleRemoveCustomChannel = (username: string) => {
+    const updated = customChannels.filter((c) => c.username !== username);
+    setCustomChannels(updated);
+    try {
+      localStorage.setItem('psa_custom_channels', JSON.stringify(updated));
+    } catch (e) {}
+  };
+
   const performCheck = useCallback(async (currentLoc?: LocationState) => {
     const loc = currentLoc || location;
     if (!loc) return;
@@ -236,7 +290,7 @@ export default function HomePage() {
     try {
       const [alertsResult, telegramResult] = await Promise.all([
         fetchActiveAlerts(),
-        fetchAllTelegramFeeds(loc.oblast, 24)
+        fetchAllTelegramFeeds(loc.oblast, 32, customChannels)
       ]);
 
       const evalResult = evaluateLocalSecurity(
@@ -269,7 +323,7 @@ export default function HomePage() {
     } finally {
       setIsChecking(false);
     }
-  }, [location, radiusKm, speakAlert]);
+  }, [location, radiusKm, speakAlert, customChannels]);
 
   const handleActivate = async () => {
     setIsLoading(true);
@@ -728,7 +782,7 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* RESEARCH & TRANSPARENCY - 118 MONITORED RADARS & SOURCES */}
+        {/* RESEARCH & TRANSPARENCY - 138+ MONITORED RADARS & SOURCES */}
         <div className="bg-[#121722] border border-[#1e2638] rounded-2xl p-4 mb-4">
           <button
             onClick={() => setShowResearchInfo(!showResearchInfo)}
@@ -736,7 +790,7 @@ export default function HomePage() {
           >
             <span className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-cyan-400" />
-              <span>Мережа тактичного моніторингу ({MONITORED_CHANNELS.length} джерел + API)</span>
+              <span>Мережа тактичного моніторингу ({MONITORED_CHANNELS.length + customChannels.length} джерел + API)</span>
             </span>
             {showResearchInfo ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
@@ -754,12 +808,89 @@ export default function HomePage() {
                 </p>
               </div>
 
-              {/* VIRAZH-PLANSHET OSINT NOTICE */}
-              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
-                <p className="font-bold text-slate-200">🛰 Дослідження системи «Віраж-Планшет»:</p>
-                <p className="text-slate-400 text-[11px] leading-relaxed">
-                  «Віраж-Планшет» — закрита військова АСУ ППО ЗСУ без публічного API. Наш агент агрегує <strong>100% легальні та верифіковані військові ретранслятори, радіолокаційні OSINT-джерела</strong> та офіційні канали з привʼязкою до мікрорайонів і векторів польоту.
-                </p>
+              {/* CUSTOM USER TELEGRAM CHANNEL ADDER */}
+              <div className="bg-slate-900/90 border border-indigo-500/30 rounded-xl p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-slate-200 flex items-center gap-1.5 text-[11px]">
+                    <span>➕ Додати власний Telegram-канал або паблік:</span>
+                  </p>
+                  {customChannels.length > 0 && (
+                    <span className="text-[10px] text-indigo-400 font-semibold font-mono">
+                      Додано вами: {customChannels.length}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-2 text-slate-500 text-xs font-mono">@</span>
+                    <input
+                      type="text"
+                      value={newChannelInput}
+                      onChange={(e) => setNewChannelInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddCustomChannel()}
+                      placeholder="tlknews, truha_ukraine, my_channel..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-6 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleAddCustomChannel()}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shrink-0 transition-colors shadow-sm"
+                  >
+                    + Додати
+                  </button>
+                </div>
+
+                {channelAddMessage && (
+                  <p className="text-[10px] text-cyan-300 font-mono animate-pulse">{channelAddMessage}</p>
+                )}
+
+                {/* Quick Add Suggestion Chips */}
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1 font-medium">Швидкі популярні пабліки (1 клік):</p>
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { u: 'tlknews', label: '+ @tlknews' },
+                      { u: 'tlk_radar', label: '+ @tlk_radar' },
+                      { u: 'truha_ukraine', label: '+ @truha_ukraine' },
+                      { u: 'lachentyt', label: '+ @lachentyt' },
+                      { u: 'insiderUKR', label: '+ @insiderUKR' },
+                      { u: 'its_zp', label: '+ @its_zp' },
+                    ].map((item) => (
+                      <button
+                        key={item.u}
+                        onClick={() => handleAddCustomChannel(item.u)}
+                        className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] text-indigo-300 hover:text-white transition-colors"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* List of Custom Added Channels */}
+                {customChannels.length > 0 && (
+                  <div className="space-y-1 pt-1 border-t border-slate-800">
+                    <p className="text-[10px] text-slate-400 font-semibold">Ваші додані канали:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {customChannels.map((c) => (
+                        <span
+                          key={c.username}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-600/50 text-[11px] text-indigo-200"
+                        >
+                          <span className="font-mono">@{c.username}</span>
+                          <button
+                            onClick={() => handleRemoveCustomChannel(c.username)}
+                            className="text-red-400 hover:text-red-200 font-bold ml-1 text-xs"
+                            title="Видалити"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* CATEGORY FILTER */}
@@ -767,7 +898,9 @@ export default function HomePage() {
                 <p className="text-[11px] font-semibold text-slate-400 mb-1.5">Фільтр джерел за напрямками:</p>
                 <div className="flex flex-wrap gap-1 text-[10px]">
                   {[
-                    { id: 'all', label: `Всі (${MONITORED_CHANNELS.length})` },
+                    { id: 'all', label: `Всі (${MONITORED_CHANNELS.length + customChannels.length})` },
+                    { id: 'osint_network', label: 'TLK, Труха & Пабліки' },
+                    { id: 'user_custom', label: `Мої канали (${customChannels.length})` },
                     { id: 'military_official', label: 'ЗСУ & ППО' },
                     { id: 'radar_national', label: 'Головні радари' },
                     { id: 'tactical_south', label: 'Запоріжжя / Одеса / Миколаїв' },
@@ -802,17 +935,26 @@ export default function HomePage() {
                   <span className="text-emerald-400 font-mono text-[10px] font-bold">● LIVE API</span>
                 </div>
 
-                {/* Filtered Monitored Channels */}
-                {MONITORED_CHANNELS
+                {/* Filtered Monitored Channels & Custom Channels */}
+                {[...customChannels, ...MONITORED_CHANNELS]
                   .filter((ch) => sourceFilter === 'all' || ch.category === sourceFilter)
                   .map((ch, idx) => (
                     <div
-                      key={ch.username}
-                      className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px]"
+                      key={ch.username + idx}
+                      className={`flex items-center justify-between p-2 rounded-xl border text-[11px] ${
+                        ch.category === 'user_custom'
+                          ? 'bg-indigo-950/50 border-indigo-600/60 text-indigo-200'
+                          : 'bg-slate-900/80 border-slate-800 text-slate-300'
+                      }`}
                     >
                       <div className="pr-2 truncate">
-                        <p className="font-semibold text-slate-200 truncate">
+                        <p className="font-semibold text-slate-200 truncate flex items-center gap-1.5">
                           {idx + 1}. {ch.title}
+                          {ch.category === 'user_custom' && (
+                            <span className="px-1.5 py-0.2 bg-indigo-600 text-white rounded text-[9px] font-mono">
+                              ВАШ КАНАЛ
+                            </span>
+                          )}
                         </p>
                         <p className="text-[10px] text-slate-400 truncate">
                           @{ch.username} • <span className="text-cyan-400">{ch.region}</span>

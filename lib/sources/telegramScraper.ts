@@ -16,7 +16,9 @@ export type ChannelCategory =
   | 'tactical_north' 
   | 'tactical_center' 
   | 'tactical_west' 
-  | 'strategic_launch';
+  | 'strategic_launch'
+  | 'osint_network'
+  | 'user_custom';
 
 export interface ChannelConfig {
   username: string;
@@ -971,17 +973,182 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Прикордонний радар",
     "weight": 0.92,
     "priority": 1
+  },
+  {
+    "username": "tlknews",
+    "title": "ТЛК Новини (TLK News / Оперативно)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "tlk_radar",
+    "title": "ТЛК Радар (TLK Radar / Загрози)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "tlk_news",
+    "title": "TLK News Ukraine",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "truha_ukraine",
+    "title": "Труха Украина (Оперативні тривоги & вибухи)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "truha_zp",
+    "title": "Труха Запорожье",
+    "category": "osint_network",
+    "region": "Запорізька область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_dnepr",
+    "title": "Труха Днепр / Павлоград",
+    "category": "osint_network",
+    "region": "Дніпропетровська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_kharkiv",
+    "title": "Труха Харьков (С-300 / КАБ)",
+    "category": "osint_network",
+    "region": "Харківська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_kyiv",
+    "title": "Труха Киев / Борисполь",
+    "category": "osint_network",
+    "region": "Київська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_odessa",
+    "title": "Труха Одесса",
+    "category": "osint_network",
+    "region": "Одеська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_nikolaev",
+    "title": "Труха Николаев",
+    "category": "osint_network",
+    "region": "Миколаївська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_sumy",
+    "title": "Труха Сумы",
+    "category": "osint_network",
+    "region": "Сумська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_chernigov",
+    "title": "Труха Чернигов",
+    "category": "osint_network",
+    "region": "Чернігівська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "truha_poltava",
+    "title": "Труха Полтава",
+    "category": "osint_network",
+    "region": "Полтавська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "lachentyt",
+    "title": "Лачен пише (Ігор Лаченков / Безпека)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 1
+  },
+  {
+    "username": "insiderUKR",
+    "title": "Инсайдер UA (Оперативні повідомлення)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "war_real4",
+    "title": "Реальна Війна (Оперативний моніторинг)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "its_zp",
+    "title": "Це Запоріжжя / Новини & Загрози",
+    "category": "osint_network",
+    "region": "Запорізька область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "hyevuy_dnepr",
+    "title": "Ху*вый Днепр (Оперативно)",
+    "category": "osint_network",
+    "region": "Дніпропетровська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "hueviy_kharkov",
+    "title": "Ху*вый Харьков (Прильоти & КАБ)",
+    "category": "osint_network",
+    "region": "Харківська область",
+    "weight": 0.88,
+    "priority": 1
+  },
+  {
+    "username": "suspilnenews",
+    "title": "Суспільне Новини (Офіційний мовник)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 2
   }
 ];
 
-export function getPrioritizedChannels(userOblast?: string): ChannelConfig[] {
+export function getPrioritizedChannels(userOblast?: string, customChannels: ChannelConfig[] = []): ChannelConfig[] {
+  const combined = [...customChannels, ...MONITORED_CHANNELS];
+
   if (!userOblast) {
-    return MONITORED_CHANNELS;
+    return combined;
   }
 
   const normUserOblast = userOblast.toLowerCase();
   
-  return [...MONITORED_CHANNELS].sort((a, b) => {
+  return combined.sort((a, b) => {
+    if (a.category === 'user_custom' && b.category !== 'user_custom') return -1;
+    if (a.category !== 'user_custom' && b.category === 'user_custom') return 1;
+
     const aMatches = a.region.toLowerCase().includes(normUserOblast) || normUserOblast.includes(a.region.toLowerCase()) || a.region === 'Вся Україна';
     const bMatches = b.region.toLowerCase().includes(normUserOblast) || normUserOblast.includes(b.region.toLowerCase()) || b.region === 'Вся Україна';
 
@@ -1024,12 +1191,12 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
     return { messages: cached.messages };
   }
 
-  const targetUrl = `https://t.me/s/${channel.username}`;
+  const targetUrl = 'https://t.me/s/' + channel.username;
   const fetchUrls = [
     targetUrl,
-    `https://r.jina.ai/https://t.me/s/${channel.username}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-    `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`
+    'https://r.jina.ai/https://t.me/s/' + channel.username,
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl),
+    'https://corsproxy.io/?url=' + encodeURIComponent(targetUrl)
   ];
 
   for (const url of fetchUrls) {
@@ -1062,7 +1229,7 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
           const timeIso = match[2];
           const unixTimestamp = new Date(timeIso).getTime();
 
-          const id = `${channel.username}_${unixTimestamp}_${decodedText.slice(0, 15).replace(/\s+/g, '_')}`;
+          const id = channel.username + '_' + unixTimestamp + '_' + decodedText.slice(0, 15).replace(/\s+/g, '_');
 
           if (decodedText.length > 3) {
             messages.push({
@@ -1083,7 +1250,7 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
             const clean = line.replace(/^[*\s#->]+/, '').trim();
             if (clean.length > 5) {
               messages.push({
-                id: `${channel.username}_${now}_${i}`,
+                id: channel.username + '_' + now + '_' + i,
                 channel: channel.username,
                 channelTitle: channel.title,
                 authorityWeight: channel.weight,
@@ -1115,12 +1282,13 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
 
 export async function fetchAllTelegramFeeds(
   userOblast?: string,
-  maxParallel: number = 28
+  maxParallel: number = 32,
+  customChannels: ChannelConfig[] = []
 ): Promise<{ messages: TelegramMessage[]; sourceStatus: Record<string, { ok: boolean; count: number; error?: string }> }> {
   const allMessages: TelegramMessage[] = [];
   const sourceStatus: Record<string, { ok: boolean; count: number; error?: string }> = {};
 
-  const channelsToQuery = getPrioritizedChannels(userOblast).slice(0, maxParallel);
+  const channelsToQuery = getPrioritizedChannels(userOblast, customChannels).slice(0, maxParallel);
 
   const results = await Promise.allSettled(
     channelsToQuery.map(ch => fetchChannelMessages(ch))
