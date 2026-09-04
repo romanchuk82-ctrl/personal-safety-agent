@@ -1,4 +1,4 @@
-import { calculateDistanceKm, extractLocationsFromText, findNearestLocation, GeoLocation } from './gazetteer';
+import { calculateDistanceKm, calculateBearingDegrees, getBearingSectorUk, extractLocationsFromText, findNearestLocation, GeoLocation } from './gazetteer';
 import { classifyThreat, ThreatCategory, ThreatClassification } from './threatClassifier';
 import { RawAlert } from './sources/alertsInUa';
 import { TelegramMessage } from './sources/telegramScraper';
@@ -21,6 +21,9 @@ export interface ThreatEvent {
   rawText: string;
   timestamp: string;
   voiceAlertText: string;
+  flugerZone?: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT';
+  bearingDegrees?: number;
+  bearingSectorUk?: string;
 }
 
 export interface SecurityEvaluationResult {
@@ -49,7 +52,6 @@ export function evaluateLocalSecurity(
 
   // 1. Evaluate Telegram OSINT messages
   for (const msg of telegramMessages) {
-    // Skip stale messages
     if (now - msg.unixTimestamp > maxMessageAgeMs) {
       continue;
     }
@@ -58,10 +60,17 @@ export function evaluateLocalSecurity(
     const locations = extractLocationsFromText(msg.text);
 
     if (classification.isAllClear) {
-      // Check if all clear relates to user area
       for (const loc of locations) {
         const dist = calculateDistanceKm(userLat, userLng, loc.lat, loc.lng);
-        if (dist <= Math.max(userRadiusKm, loc.defaultRadiusKm)) {
+        const bearing = calculateBearingDegrees(userLat, userLng, loc.lat, loc.lng);
+        const sector = getBearingSectorUk(bearing);
+
+        if (dist <= Math.max(userRadiusKm, 45.0)) {
+          let flugerZone: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT' = 'ZONE_DISTANT';
+          if (dist <= 15) flugerZone = 'ZONE_15KM';
+          else if (dist <= 30) flugerZone = 'ZONE_30KM';
+          else if (dist <= 45) flugerZone = 'ZONE_45KM';
+
           threatEvents.push({
             id: msg.id,
             source: 'telegram',
@@ -79,7 +88,10 @@ export function evaluateLocalSecurity(
             requiresImmediateShelter: false,
             rawText: msg.text,
             timestamp: msg.timeIso,
-            voiceAlertText: `${userName}, увага. Повідомлено про відбій загрози поблизу ${loc.name}.`
+            voiceAlertText: `${userName}, увага. Повідомлено про відбій загрози поблизу ${loc.name}.`,
+            flugerZone,
+            bearingDegrees: bearing,
+            bearingSectorUk: sector
           });
         }
       }
@@ -90,24 +102,35 @@ export function evaluateLocalSecurity(
     for (const loc of locations) {
       const dist = calculateDistanceKm(userLat, userLng, loc.lat, loc.lng);
       const isDirect = dist <= userRadiusKm;
-      const isVicinity = dist <= (userRadiusKm + 10);
+      const isFlugerCoverage = dist <= 45.0;
 
-      if (isDirect || isVicinity) {
+      if (isDirect || isFlugerCoverage) {
+        const bearing = calculateBearingDegrees(userLat, userLng, loc.lat, loc.lng);
+        const sector = getBearingSectorUk(bearing);
+
+        let flugerZone: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT' = 'ZONE_DISTANT';
+        if (dist <= 15) flugerZone = 'ZONE_15KM';
+        else if (dist <= 30) flugerZone = 'ZONE_30KM';
+        else if (dist <= 45) flugerZone = 'ZONE_45KM';
+
         let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
-        let confidenceReason = `Зафіксовано загрозу в радіусі ${dist} км (${loc.name})`;
+        let confidenceReason = `Зафіксовано загрозу в радіусі ${dist} км (${loc.name}, сектор: ${sector})`;
 
-        if (dist <= 3.5 || loc.type === 'microdistrict') {
+        if (dist <= 5.0 || loc.type === 'microdistrict') {
           confidence = 'HIGH';
-          confidenceReason = `Точна фіксація мікрорайону/локації в радіусі ${dist} км від ваших координат`;
-        } else if (msg.authorityWeight >= 0.95 && dist <= userRadiusKm) {
+          confidenceReason = `Точна фіксація мікрорайону в радіусі ${dist} км (${sector})`;
+        } else if (msg.authorityWeight >= 0.95 && dist <= 15) {
           confidence = 'HIGH';
-          confidenceReason = `Підтверджено перевіреним каналом радару (@${msg.channel}) у радіусі ${dist} км`;
-        } else if (!isDirect && isVicinity) {
+          confidenceReason = `Підтверджено радаром (@${msg.channel}) у зоні прямого ураження (${dist} км)`;
+        } else if (dist <= 30) {
           confidence = 'MEDIUM';
-          confidenceReason = `Загроза у прилеглому районі (${loc.name}, ~${dist} км). Підвищена готовність.`;
+          confidenceReason = `Загроза у зоні підльоту (${loc.name}, ~${dist} км, ${sector})`;
+        } else {
+          confidence = 'LOW';
+          confidenceReason = `Раннє радарне спостереження (${loc.name}, ~${dist} км, ${sector})`;
         }
 
-        const voiceAlertText = `${userName}, увага. Є підтверджена інформація про потенційну загрозу (${classification.categoryNameUk}) поблизу вашого району ${loc.name}, приблизно ${dist} км. Рекомендується негайно перейти в безпечне місце.`;
+        const voiceAlertText = `${userName}, увага. Є підтверджена інформація про загрозу (${classification.categoryNameUk}) поблизу ${loc.name}, приблизно ${dist} км у секторі ${sector}.`;
 
         threatEvents.push({
           id: msg.id,
@@ -123,10 +146,13 @@ export function evaluateLocalSecurity(
           isWithinRadius: isDirect,
           confidence,
           confidenceReason,
-          requiresImmediateShelter: classification.requiresImmediateShelter && (isDirect || dist <= 8),
+          requiresImmediateShelter: classification.requiresImmediateShelter && (isDirect || dist <= 15),
           rawText: msg.text,
           timestamp: msg.timeIso,
-          voiceAlertText
+          voiceAlertText,
+          flugerZone,
+          bearingDegrees: bearing,
+          bearingSectorUk: sector
         });
       }
     }
@@ -136,12 +162,7 @@ export function evaluateLocalSecurity(
   for (const alert of alerts) {
     if (alert.finished_at) continue;
 
-    // Check if alert matches user oblast or nearest known location
     const alertTitle = (alert.location_title || '').toLowerCase();
-    const alertOblast = (alert.location_oblast || '').toLowerCase();
-    const userOblastNorm = nearestUserLoc.location.oblast.toLowerCase();
-
-    // Check if alert matches user hromada / raion / city
     let matchedLocation: GeoLocation | null = null;
     const extracted = extractLocationsFromText(alert.location_title);
     if (extracted.length > 0) {
@@ -152,10 +173,19 @@ export function evaluateLocalSecurity(
 
     if (matchedLocation) {
       const dist = calculateDistanceKm(userLat, userLng, matchedLocation.lat, matchedLocation.lng);
-      const isDirect = dist <= (userRadiusKm + 2);
+      const isDirect = dist <= userRadiusKm;
+      const isFlugerCoverage = dist <= 45.0;
 
-      if (isDirect) {
+      if (isDirect || isFlugerCoverage) {
         const isTacticalAlert = alert.alert_type === 'artillery_shelling' || alert.alert_type === 'urban_fights';
+        const bearing = calculateBearingDegrees(userLat, userLng, matchedLocation.lat, matchedLocation.lng);
+        const sector = getBearingSectorUk(bearing);
+
+        let flugerZone: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT' = 'ZONE_DISTANT';
+        if (dist <= 15) flugerZone = 'ZONE_15KM';
+        else if (dist <= 30) flugerZone = 'ZONE_30KM';
+        else if (dist <= 45) flugerZone = 'ZONE_45KM';
+
         threatEvents.push({
           id: `alert_in_ua_${alert.id}`,
           source: 'alerts.in.ua',
@@ -167,24 +197,26 @@ export function evaluateLocalSecurity(
           detectedOblast: alert.location_oblast,
           threatCoordinates: { lat: matchedLocation.lat, lng: matchedLocation.lng },
           distanceKm: dist,
-          isWithinRadius: dist <= userRadiusKm,
+          isWithinRadius: isDirect,
           confidence: alert.location_type === 'hromada' || alert.location_type === 'city' ? 'HIGH' : 'MEDIUM',
           confidenceReason: isTacticalAlert 
-            ? `Офіційно підтверджено загрозу артобстрілу для ${alert.location_title} (~${dist} км)`
+            ? `Офіційно підтверджено загрозу артобстрілу для ${alert.location_title} (~${dist} км, ${sector})`
             : `Загальна сирена тривоги для ${alert.location_title} (~${dist} км, фоновий статус)`,
-          requiresImmediateShelter: isTacticalAlert,
+          requiresImmediateShelter: isTacticalAlert && (isDirect || dist <= 15),
           rawText: `Офіційне сповіщення (${alert.alert_type}) для ${alert.location_title}. Початок: ${alert.started_at}`,
           timestamp: alert.started_at,
           voiceAlertText: isTacticalAlert 
             ? `${userName}, увага. Офіційно підтверджено загрозу артобстрілу поблизу ${alert.location_title}. Терміново в укриття!`
-            : `${userName}, увага. Оголошено загальну тривогу для сектору ${alert.location_title}.`
+            : `${userName}, увага. Оголошено загальну тривогу для сектору ${alert.location_title}.`,
+          flugerZone,
+          bearingDegrees: bearing,
+          bearingSectorUk: sector
         });
       }
     }
   }
 
   // Deduplicate and prioritize threats
-  // Sort: CRITICAL -> HIGH -> MEDIUM -> INFO, then closest distance, then newest
   threatEvents.sort((a, b) => {
     const sevScore: Record<string, number> = { CRITICAL: 3, HIGH: 2, MEDIUM: 1, INFO: 0 };
     const scoreDiff = (sevScore[b.severity] || 0) - (sevScore[a.severity] || 0);
@@ -198,7 +230,7 @@ export function evaluateLocalSecurity(
   const activeThreats = threatEvents.filter(
     t => t.category !== 'ALL_CLEAR' && 
          t.category !== 'GENERAL_AIR_RAID' && 
-         (t.isWithinRadius || (t.distanceKm !== null && t.distanceKm <= 10))
+         t.isWithinRadius
   );
   
   const primaryThreat = activeThreats.length > 0 ? activeThreats[0] : null;

@@ -597,3 +597,28 @@ export function extractLocationsFromText(text: string): GeoLocation[] {
 
   return matched;
 }
+
+export function calculateBearingDegrees(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLon = ((lng2 - lng1) * Math.PI) / 180;
+  const lat1Rad = (lat1 * Math.PI) / 180;
+  const lat2Rad = (lat2 * Math.PI) / 180;
+
+  const y = Math.sin(dLon) * Math.cos(lat2Rad);
+  const x =
+    Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+    Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+
+  const brng = (Math.atan2(y, x) * 180) / Math.PI;
+  return Math.round((brng + 360) % 360);
+}
+
+export function getBearingSectorUk(bearingDeg: number): string {
+  if (bearingDeg >= 337.5 || bearingDeg < 22.5) return 'Північ (N)';
+  if (bearingDeg >= 22.5 && bearingDeg < 67.5) return 'Північний Схід (NE)';
+  if (bearingDeg >= 67.5 && bearingDeg < 112.5) return 'Схід (E)';
+  if (bearingDeg >= 112.5 && bearingDeg < 157.5) return 'Південний Схід (SE)';
+  if (bearingDeg >= 157.5 && bearingDeg < 202.5) return 'Південь (S)';
+  if (bearingDeg >= 202.5 && bearingDeg < 247.5) return 'Південний Захід (SW)';
+  if (bearingDeg >= 247.5 && bearingDeg < 292.5) return 'Захід (W)';
+  return 'Північний Захід (NW)';
+}

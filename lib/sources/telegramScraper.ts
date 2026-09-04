@@ -1269,6 +1269,38 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Запорізька область",
     "weight": 0.92,
     "priority": 1
+  },
+  {
+    "username": "ePPO_app",
+    "title": "єППО Офіційний (КБ Технарі / Розробники «Флюгер»)",
+    "category": "radar_national",
+    "region": "Вся Україна",
+    "weight": 0.98,
+    "priority": 1
+  },
+  {
+    "username": "ePPO_news",
+    "title": "єППО Новини & Радарний моніторинг",
+    "category": "radar_national",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 1
+  },
+  {
+    "username": "technari_ua",
+    "title": "КБ «Технарі» (Розробники єППО та «Флюгер»)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.94,
+    "priority": 1
+  },
+  {
+    "username": "suldin_odesa",
+    "title": "Геннадій Сульдін (Керівник проєкту єППО / «Флюгер»)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.92,
+    "priority": 2
   }
 ];
 
