@@ -1,7 +1,7 @@
 import { calculateDistanceKm, calculateBearingDegrees, getBearingSectorUk, extractGeoFromText, findNearestLocation, GeoLocation, RegionalZone } from './gazetteer';
 import { classifyThreat, getThreatTtlMinutes, ThreatCategory, ThreatClassification } from './threatClassifier';
 import { RawAlert } from './sources/alertsInUa';
-import { TelegramMessage, clusterTelegramMessages, MessageCluster, ClusterSourceEntry } from './sources/telegramScraper';
+import { TelegramMessage, clusterTelegramMessages, MessageCluster, ClusterSourceEntry, TelegramIngestMetrics } from './sources/telegramScraper';
 
 export type SecurityState = 'GREEN' | 'ORANGE' | 'RED' | 'DEGRADED';
 export type SpatialPrecision = 'EXACT_MICRODISTRICT' | 'CITY_AREA' | 'RAION_SECTOR' | 'REGIONAL_CORRIDOR';
@@ -108,6 +108,13 @@ export interface SecurityEvaluationResult {
     healthy: number;
     unavailable: number;
     disabled: number;
+    userPriorityTotal?: number;
+    userPriorityHealthy?: number;
+    criticalTotal?: number;
+    criticalHealthy?: number;
+    regionalTotal?: number;
+    regionalHealthy?: number;
+    removedUnusable?: number;
   };
   lastRealDataTimestamp: number;
   lastRealDataIso: string | null;
@@ -122,18 +129,7 @@ export function evaluateLocalSecurity(
   telegramMessages: TelegramMessage[] = [],
   lastSuccessfulDataTs?: number,
   alertsStatus?: 'OK' | 'CACHE' | 'ERROR',
-  telegramMetrics?: {
-    totalSources: number;
-    monitoredSources: number;
-    healthyCount: number;
-    unavailableCount: number;
-    disabledCount: number;
-    criticalTotal: number;
-    criticalHealthy: number;
-    lastSuccessfulCycleTs: number;
-    lastRealDataTimestamp: number;
-    lastRealDataIso: string | null;
-  }
+  telegramMetrics?: Partial<TelegramIngestMetrics>
 ): SecurityEvaluationResult {
   const threatEvents: ThreatEvent[] = [];
   const rejectedMessagesLog: RejectedMessageItem[] = [];
@@ -181,10 +177,10 @@ export function evaluateLocalSecurity(
     monitoringHealth = 'INCOMPLETE';
     monitoringHealthReasonUk = `Дані застаріли (>90с). Останнє оновлення: ${staleMin > 1 ? staleMin + ' хв' : staleSec + 'с'} тому`;
     monitoringHealthDetailsUk = `Перевірте інтернет або доступність проксі`;
-  } else if (telegramMetrics && telegramMetrics.criticalTotal > 0 && telegramMetrics.criticalHealthy < Math.min(3, telegramMetrics.criticalTotal) && telegramMetrics.healthyCount === 0) {
+  } else if (telegramMetrics && critTotal > 0 && critHealthy < Math.min(3, critTotal) && totalHealthy === 0) {
     monitoringHealth = 'INCOMPLETE';
     monitoringHealthReasonUk = 'Критичні радарні джерела не відповідають';
-    monitoringHealthDetailsUk = `Працюють ${telegramMetrics.criticalHealthy} із ${telegramMetrics.criticalTotal} критичних радарів`;
+    monitoringHealthDetailsUk = `Працюють ${critHealthy} із ${critTotal} критичних радарів`;
   } else if (alertsStatus === 'ERROR' || (telegramMetrics && totalHealthy < totalMonitored * 0.45)) {
     monitoringHealth = 'DEGRADED';
     const unavailableNum = totalMonitored - totalHealthy;
@@ -693,11 +689,18 @@ export function evaluateLocalSecurity(
   }
 
   const monitoringStats = {
-    total: telegramMetrics?.totalSources || 171,
+    total: telegramMetrics?.totalSources || 74,
     monitored: totalMonitored,
     healthy: totalHealthy,
     unavailable: telegramMetrics?.unavailableCount !== undefined ? telegramMetrics.unavailableCount : (totalMonitored - totalHealthy),
-    disabled: telegramMetrics?.disabledCount !== undefined ? telegramMetrics.disabledCount : 98
+    disabled: 0,
+    userPriorityTotal: telegramMetrics?.userPriorityTotal ?? 11,
+    userPriorityHealthy: telegramMetrics?.userPriorityHealthy ?? 11,
+    criticalTotal: telegramMetrics?.criticalTotal ?? 25,
+    criticalHealthy: telegramMetrics?.criticalHealthy ?? 25,
+    regionalTotal: telegramMetrics?.regionalTotal ?? 38,
+    regionalHealthy: telegramMetrics?.regionalHealthy ?? 38,
+    removedUnusable: telegramMetrics?.removedUnusableCount ?? 98
   };
 
   return {

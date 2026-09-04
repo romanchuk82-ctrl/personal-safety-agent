@@ -20,7 +20,7 @@ export type ChannelCategory =
   | 'osint_network'
   | 'user_custom';
 
-export type SourceTier = 'CRITICAL' | 'TACTICAL' | 'REGIONAL' | 'OSINT' | 'CUSTOM';
+export type SourceTier = 'USER_PRIORITY' | 'CRITICAL' | 'TACTICAL' | 'REGIONAL' | 'OSINT' | 'CUSTOM';
 
 export interface ChannelConfig {
   username: string;
@@ -34,6 +34,130 @@ export interface ChannelConfig {
   enabled?: boolean;
   reason?: string;
 }
+
+export const USER_PRIORITY_CHANNELS: ChannelConfig[] = [
+  {
+    "username": "kievreal1",
+    "title": "Київ Інфо / Реальний Київ (Радар столиці & БпЛА)",
+    "category": "user_custom",
+    "region": "Київ та область",
+    "weight": 0.98,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "Hajun_BY",
+    "title": "Беларускі Гаюн (Моніторинг авіації та Шахедів)",
+    "category": "user_custom",
+    "region": "Північ / Білоруський кордон",
+    "weight": 0.97,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "tlknews",
+    "title": "ТЛК Новини (TLK News / Оперативно)",
+    "category": "user_custom",
+    "region": "Вся Україна",
+    "weight": 0.96,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "truha_ukraine",
+    "title": "Труха Украина (Оперативні тривоги & вибухи)",
+    "category": "user_custom",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "lachentyt",
+    "title": "Лачен пише (Ігор Лаченков / Безпека)",
+    "category": "user_custom",
+    "region": "Вся Україна",
+    "weight": 0.96,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "insiderUKR",
+    "title": "Инсайдер UA (Оперативні повідомлення)",
+    "category": "user_custom",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "suspilnenews",
+    "title": "Суспільне Новини (Офіційний мовник)",
+    "category": "user_custom",
+    "region": "Вся Україна",
+    "weight": 0.97,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "truha_dnepr",
+    "title": "Труха Днепр (Оперативно)",
+    "category": "user_custom",
+    "region": "Дніпропетровська область",
+    "weight": 0.93,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "truha_odessa",
+    "title": "Труха Одесса (Оперативно)",
+    "category": "user_custom",
+    "region": "Одеська область",
+    "weight": 0.93,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "truha_nikolaev",
+    "title": "Труха Николаев (Оперативно)",
+    "category": "user_custom",
+    "region": "Миколаївська область",
+    "weight": 0.93,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  },
+  {
+    "username": "truha_poltava",
+    "title": "Труха Полтава (Оперативно)",
+    "category": "user_custom",
+    "region": "Полтавська область",
+    "weight": 0.93,
+    "priority": 1,
+    "tier": "USER_PRIORITY",
+    "hasWebPreview": true,
+    "enabled": true
+  }
+];
 
 export const MONITORED_CHANNELS: ChannelConfig[] = [
   {
@@ -97,7 +221,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "military_official",
     "region": "Вся Україна",
     "weight": 0.9,
-    "priority": 2,
+    "priority": 1,
     "tier": "CRITICAL",
     "hasWebPreview": true,
     "enabled": true
@@ -120,7 +244,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Прикордоння",
     "weight": 0.9,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -131,7 +255,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Вся Україна",
     "weight": 0.9,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -142,7 +266,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Вся Україна",
     "weight": 0.95,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -152,8 +276,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "radar_national",
     "region": "Вся Україна",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "CRITICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -174,7 +298,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "military_official",
     "region": "Вся Україна",
     "weight": 0.95,
-    "priority": 2,
+    "priority": 1,
     "tier": "CRITICAL",
     "hasWebPreview": true,
     "enabled": true
@@ -185,8 +309,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_south",
     "region": "Запорізька область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -219,7 +343,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Вся Україна",
     "weight": 0.88,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -229,8 +353,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_east",
     "region": "Дніпропетровська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -240,7 +364,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "radar_national",
     "region": "Фронт / Україна",
     "weight": 0.9,
-    "priority": 2,
+    "priority": 1,
     "tier": "CRITICAL",
     "hasWebPreview": true,
     "enabled": true
@@ -251,8 +375,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_east",
     "region": "Дніпропетровська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -263,7 +387,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Запорізька область",
     "weight": 0.85,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -274,7 +398,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Дніпропетровська область",
     "weight": 0.88,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -284,8 +408,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_east",
     "region": "Дніпропетровська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -307,7 +431,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Дніпропетровська область",
     "weight": 0.85,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -317,8 +441,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_south",
     "region": "Одеська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -383,8 +507,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_south",
     "region": "Одеська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -394,8 +518,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_north",
     "region": "Сумська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -405,8 +529,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_south",
     "region": "Миколаївська область",
     "weight": 0.92,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -416,8 +540,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_north",
     "region": "Чернігівська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -427,8 +551,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Полтавська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -449,19 +573,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Полтавська область",
     "weight": 0.92,
-    "priority": 1,
-    "tier": "TACTICAL",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "truha_ukraine",
-    "title": "Труха Украина (Оперативні тривоги & вибухи)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "tier": "OSINT",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -472,62 +585,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Чернігівська область",
     "weight": 0.85,
     "priority": 2,
-    "tier": "TACTICAL",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "truha_dnepr",
-    "title": "Труха Днепр / Павлоград",
-    "category": "osint_network",
-    "region": "Дніпропетровська область",
-    "weight": 0.88,
-    "priority": 1,
-    "tier": "OSINT",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "truha_nikolaev",
-    "title": "Труха Николаев",
-    "category": "osint_network",
-    "region": "Миколаївська область",
-    "weight": 0.88,
-    "priority": 1,
-    "tier": "OSINT",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "truha_poltava",
-    "title": "Труха Полтава",
-    "category": "osint_network",
-    "region": "Полтавська область",
-    "weight": 0.88,
-    "priority": 1,
-    "tier": "OSINT",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "truha_odessa",
-    "title": "Труха Одесса",
-    "category": "osint_network",
-    "region": "Одеська область",
-    "weight": 0.88,
-    "priority": 1,
-    "tier": "OSINT",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "tlknews",
-    "title": "ТЛК Новини (TLK News / Оперативно)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.92,
-    "priority": 1,
-    "tier": "OSINT",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -548,8 +606,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "osint_network",
     "region": "Вся Україна",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "OSINT",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -559,8 +617,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "strategic_launch",
     "region": "Крим / Південь",
     "weight": 0.92,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -581,8 +639,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "radar_national",
     "region": "Вся Україна",
     "weight": 0.93,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -593,18 +651,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Вся Україна",
     "weight": 0.89,
     "priority": 2,
-    "tier": "OSINT",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "insiderUKR",
-    "title": "Инсайдер UA (Оперативні повідомлення)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "tier": "OSINT",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -614,8 +661,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "osint_network",
     "region": "Вся Україна",
     "weight": 0.92,
-    "priority": 1,
-    "tier": "OSINT",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -625,7 +672,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "military_official",
     "region": "Вся Україна",
     "weight": 0.95,
-    "priority": 2,
+    "priority": 1,
     "tier": "CRITICAL",
     "hasWebPreview": true,
     "enabled": true
@@ -636,8 +683,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "osint_network",
     "region": "Дніпропетровська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "OSINT",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -658,8 +705,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_south",
     "region": "Миколаївська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -669,8 +716,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "osint_network",
     "region": "Вся Україна",
     "weight": 0.93,
-    "priority": 1,
-    "tier": "OSINT",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -680,8 +727,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_east",
     "region": "Харківська область",
     "weight": 0.91,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -708,24 +755,13 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "enabled": true
   },
   {
-    "username": "kievreal1",
-    "title": "Київ Інфо (Радар столиці & БпЛА)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.92,
-    "priority": 1,
-    "tier": "TACTICAL",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
     "username": "kyivmonitoring1",
     "title": "Київ Моніторинг / Радар (Київщина, Бориспіль)",
     "category": "tactical_north",
     "region": "Київська область",
     "weight": 0.92,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -736,7 +772,7 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Київська область",
     "weight": 0.92,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -746,8 +782,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_east",
     "region": "Дніпропетровська область",
     "weight": 0.91,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -757,8 +793,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Київська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -768,8 +804,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Київська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -779,8 +815,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Київська область",
     "weight": 0.92,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -790,8 +826,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Київська область",
     "weight": 0.9,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -801,8 +837,8 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "category": "tactical_center",
     "region": "Київська область",
     "weight": 0.88,
-    "priority": 1,
-    "tier": "TACTICAL",
+    "priority": 2,
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
   },
@@ -813,1212 +849,44 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Київська область",
     "weight": 0.88,
     "priority": 2,
-    "tier": "TACTICAL",
+    "tier": "REGIONAL",
     "hasWebPreview": true,
     "enabled": true
-  },
-  {
-    "username": "lachentyt",
-    "title": "Лачен пише (Ігор Лаченков / Безпека)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.95,
-    "priority": 1,
-    "tier": "CRITICAL",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "suspilnenews",
-    "title": "Суспільне Новини (Офіційний мовник)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.95,
-    "priority": 2,
-    "tier": "OSINT",
-    "hasWebPreview": true,
-    "enabled": true
-  },
-  {
-    "username": "StratComUA",
-    "title": "СтратКом ЗСУ",
-    "category": "military_official",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "motuzka_zsu",
-    "title": "ППО України / Черговий сектор",
-    "category": "military_official",
-    "region": "Вся Україна",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pivden_mil_ua",
-    "title": "Оперативне командування «Південь»",
-    "category": "military_official",
-    "region": "Південь",
-    "weight": 0.95,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "armyinform_ua",
-    "title": "АрміяInform (Офіційне медіа Міноборони)",
-    "category": "military_official",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "chub_inform",
-    "title": "ЧУБ Інформ (Пуски ракет & КАБ)",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "uawarinfobot",
-    "title": "UA War Radar Bot Channel",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "front1line",
-    "title": "Фронт News (Тактична обстановка)",
-    "category": "radar_national",
-    "region": "Фронт",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "oper_radar",
-    "title": "Оперативний Радар ППО",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "povitryani_syly",
-    "title": "Повітряні Цілі / Радар ППО",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "shahed_tracker",
-    "title": "Трекер Дронів & Курси БпЛА",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "zaporizhzhia_alarm",
-    "title": "Запоріжжя Інфо Тактика",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "orikhiv_live",
-    "title": "Оріхів / Гуляйполе фронтовий радар",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "baburka_radar",
-    "title": "Хортицький р-н / Бабурка Радар",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kushuhum_radar",
-    "title": "Кушугум / Балабине / Південний напрямок",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "shevchik_radar",
-    "title": "Шевченківський р-н Запоріжжя Монітор",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "dniproraion_zp",
-    "title": "Дніпровський р-н / Правий берег ЗП",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "huliaipole_war",
-    "title": "Гуляйпільський напрямок тактична обстановка",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kryvyirih_radar",
-    "title": "Кривий Ріг Радар ППО",
-    "category": "tactical_east",
-    "region": "Дніпропетровська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "nikopol_radar",
-    "title": "Нікополь & Марганець (Загрози артобстрілу)",
-    "category": "tactical_east",
-    "region": "Дніпропетровська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pavlohrad_live",
-    "title": "Павлоград Оперативний / Західний Донбас",
-    "category": "tactical_east",
-    "region": "Дніпропетровська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pavlohrad_radar",
-    "title": "Павлоград Радар & Загрози",
-    "category": "tactical_east",
-    "region": "Дніпропетровська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "saltivka_radar",
-    "title": "Салтівка / Північ Харкова Монітор",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kharkiv_radar",
-    "title": "Харків Радар (Загрози КАБ & Балістика)",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "alekseevka_kh",
-    "title": "Олексіївка / Холодна Гора Радар",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "izium_live",
-    "title": "Ізюм / Балаклія Радар",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "derhachi_radar",
-    "title": "Дергачі / Золочів прикордонний монітор",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kupiansk_front",
-    "title": "Купʼянськ / Вовчанськ Фронтовий Монітор",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "chuhuiv_radar",
-    "title": "Чугуїв / Печеніги Радар ППО",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "poskot_radar",
-    "title": "Посьолок Котовського / Пересип Монітор",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "tairova_radar",
-    "title": "Таїрова / Фонтан / Чорноморка Радар",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "liubotyn_radar",
-    "title": "Люботин / Пісочин сектор",
-    "category": "tactical_east",
-    "region": "Харківська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "zatoka_radar",
-    "title": "Затока / Білгород-Дністровський",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "chornomorsk_radar",
-    "title": "Чорноморськ / Овідіополь Радар",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "izmail_radar",
-    "title": "Ізмаїл / Рені / Подунавʼя (Дрони)",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "podilsk_radar",
-    "title": "Подільськ / Північ Одещини Радар",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "mykolaiv_radar",
-    "title": "Миколаїв Радар ППО & Дрони",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "korabelny_nikolaev",
-    "title": "Корабельний район Миколаєва Монітор",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "solyani_radar",
-    "title": "Соляні / Інгульський / Варварівка",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "ochakiv_radar",
-    "title": "Очаків / Куцуруб (Загрози РСЗВ & КАБ)",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "voznesensk_radar",
-    "title": "Вознесенськ / Южноукраїнськ Радар",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "bashtanka_radar",
-    "title": "Баштанка / Снігурівка сектор",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pervomaisk_radar",
-    "title": "Первомайськ Радар",
-    "category": "tactical_south",
-    "region": "Миколаївська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "sumskaODA",
-    "title": "Сумська ОВА (КАБ & Прикордонні удари)",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.95,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "sumy_kovpak",
-    "title": "Ковпаківський / Зарічний р-ни Суми",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "okhtyrka_radar",
-    "title": "Охтирка / Тростянець Радар",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "yuzhne_live",
-    "title": "Южне / Коблеве прибережний радар",
-    "category": "tactical_south",
-    "region": "Одеська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "konotop_radar",
-    "title": "Конотоп / Ромни Радар",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "shostka_radar",
-    "title": "Шостка / Глухів прикордонний монітор",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "krasnopillia_front",
-    "title": "Краснопілля / Велика Писарівка (КАБ & РСЗВ)",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "chernihiv_radar",
-    "title": "Чернігів Радар ППО & Дрони",
-    "category": "tactical_north",
-    "region": "Чернігівська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "horodnia_radar",
-    "title": "Городня / Корюківка прикордонний монітор",
-    "category": "tactical_north",
-    "region": "Чернігівська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kozelets_radar",
-    "title": "Козелець / Остер / Київський напрямок",
-    "category": "tactical_north",
-    "region": "Чернігівська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "lebedyn_live",
-    "title": "Лебедин / Сумський район",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pryluki_radar",
-    "title": "Прилуки / Південь Чернігівщини",
-    "category": "tactical_north",
-    "region": "Чернігівська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "bilopillia_radar",
-    "title": "Білопілля / Ворожба тактична обстановка",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "masany_chernihiv",
-    "title": "Масани / Подусівка / Бобровиця (Чернігів)",
-    "category": "tactical_north",
-    "region": "Чернігівська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "krolevets_radar",
-    "title": "Кролевець / Путивль сектор",
-    "category": "tactical_north",
-    "region": "Сумська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "novhorod_radar",
-    "title": "Новгород-Сіверський / Семенівка (КАБ)",
-    "category": "tactical_north",
-    "region": "Чернігівська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kremenchuk_radar",
-    "title": "Кременчук Радар ППО",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "tu95ms_tracker",
-    "title": "Трекер Стратегічної Авіації (ТУ-95МС / ТУ-22М3)",
-    "category": "strategic_launch",
-    "region": "Стратегічний моніторинг",
-    "weight": 0.95,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kobeliaky_radar",
-    "title": "Кобеляки / Решетилівка коридор",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "blacksea_radar",
-    "title": "Чорне Море (Носії крилатих ракет «Калібр»)",
-    "category": "strategic_launch",
-    "region": "Чорне море",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "poltava_levada",
-    "title": "Левада / Алмазний / Сади (Полтава)",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "myrgorod_radar",
-    "title": "Миргород (Авіаційний сектор & Ракети)",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "belgorod_launches",
-    "title": "Бєлгородський напрямок (Пуски балістики & КАБ)",
-    "category": "strategic_launch",
-    "region": "Прикордонний радар",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "tlk_radar",
-    "title": "ТЛК Радар (TLK Radar / Загрози)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "truha_zp",
-    "title": "Труха Запорожье",
-    "category": "osint_network",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "horishni_plavni",
-    "title": "Горішні Плавні Радар",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "hadiach_radar",
-    "title": "Гадяч / Північ Полтавщини",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.85,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "lubny_radar",
-    "title": "Лубни / Пирятин Радар",
-    "category": "tactical_center",
-    "region": "Полтавська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "truha_kharkiv",
-    "title": "Труха Харьков (С-300 / КАБ)",
-    "category": "osint_network",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "truha_chernigov",
-    "title": "Труха Чернигов",
-    "category": "osint_network",
-    "region": "Чернігівська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "truha_sumy",
-    "title": "Труха Сумы",
-    "category": "osint_network",
-    "region": "Сумська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "its_zp",
-    "title": "Це Запоріжжя / Новини & Загрози",
-    "category": "osint_network",
-    "region": "Запорізька область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "war_real4",
-    "title": "Реальна Війна (Оперативний моніторинг)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "hueviy_kharkov",
-    "title": "Ху*вый Харьков (Прильоти & КАБ)",
-    "category": "osint_network",
-    "region": "Харківська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "chyste_nebo",
-    "title": "Чисте Небо (Моніторинг балістики, крилатих ракет & КАБ)",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.95,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "zaporozhye_radar",
-    "title": "Запоріжжя Радар (КАБи та РСЗВ з ТОТ)",
-    "category": "tactical_south",
-    "region": "Запорізька область",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "ePPO_app",
-    "title": "єППО Офіційний (КБ Технарі / Розробники «Флюгер»)",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.98,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "ePPO_news",
-    "title": "єППО Новини & Радарний моніторинг",
-    "category": "radar_national",
-    "region": "Вся Україна",
-    "weight": 0.95,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "technari_ua",
-    "title": "КБ «Технарі» (Розробники єППО та «Флюгер»)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.94,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "suldin_odesa",
-    "title": "Геннадій Сульдін (Керівник проєкту єППО / «Флюгер»)",
-    "category": "osint_network",
-    "region": "Вся Україна",
-    "weight": 0.92,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "radar_kyiv",
-    "title": "Радар Київ (ППО, Шахеди & Ракети)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kievnow",
-    "title": "Київ Зараз (Екстрені сповіщення)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "dtp_kiev",
-    "title": "ДТП та Надзвичайні події Києва",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "kiev_alerts",
-    "title": "Київська ОВА / Руслан Кравченко",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.95,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "tlk_kyiv",
-    "title": "ТЛК Київ (Тривога / Локації / Курси)",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.92,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "obolon_live",
-    "title": "Оболонь / Куренівка / Мінський Радар",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "poznyaki_live",
-    "title": "Дарниця / Позняки / Осокорки Live",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "troeshchina_live",
-    "title": "Деснянський / Троєщина Live",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pechersk_monitor",
-    "title": "Печерськ / Центр / Поділ Монітор",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "svyatoshin_live",
-    "title": "Святошин / Нивки / Академмістечко Live",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "vyshhorod_live",
-    "title": "Вишгород / ГЕС / Північний сектор",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "solomianka_radar",
-    "title": "Солом'янка / Жуляни Радар",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "bila_tserkva_radar",
-    "title": "Біла Церква Радар",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "vasylkiv_aviation",
-    "title": "Васильків / Фастів Авіаційний сектор",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.9,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "pereyaslav_radar",
-    "title": "Переяслав / Яготин / Березань Радар",
-    "category": "tactical_center",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 2,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "TACTICAL",
-    "hasWebPreview": false,
-    "enabled": false
-  },
-  {
-    "username": "truha_kyiv",
-    "title": "Труха Киев / Борисполь",
-    "category": "osint_network",
-    "region": "Київська область",
-    "weight": 0.88,
-    "priority": 1,
-    "reason": "Немає публічного веб-прев’ю в Telegram",
-    "tier": "OSINT",
-    "hasWebPreview": false,
-    "enabled": false
   }
 ];
 
 export function getPrioritizedChannels(userOblast?: string, customChannels: ChannelConfig[] = []): ChannelConfig[] {
-  const combined = [...customChannels, ...MONITORED_CHANNELS];
+  // Deduplicate user custom channels and USER_PRIORITY_CHANNELS
+  const seenUsernames = new Set<string>();
+  const userPriorityMerged: ChannelConfig[] = [];
+
+  // 1. First add any custom channels passed dynamically from storage
+  for (const ch of customChannels) {
+    const u = ch.username.toLowerCase();
+    if (!seenUsernames.has(u)) {
+      seenUsernames.add(u);
+      userPriorityMerged.push({
+        ...ch,
+        tier: 'USER_PRIORITY',
+        category: 'user_custom',
+        priority: 1
+      });
+    }
+  }
+
+  // 2. Add built-in USER_PRIORITY_CHANNELS if not already in list
+  for (const ch of USER_PRIORITY_CHANNELS) {
+    const u = ch.username.toLowerCase();
+    if (!seenUsernames.has(u)) {
+      seenUsernames.add(u);
+      userPriorityMerged.push(ch);
+    }
+  }
+
+  // 3. Add system MONITORED_CHANNELS (excluding duplicates of user channels)
+  const systemAvailable = MONITORED_CHANNELS.filter(c => !seenUsernames.has(c.username.toLowerCase()));
+
+  const combined = [...userPriorityMerged, ...systemAvailable];
 
   if (!userOblast) {
     return combined;
@@ -2027,10 +895,11 @@ export function getPrioritizedChannels(userOblast?: string, customChannels: Chan
   const normUserOblast = userOblast.toLowerCase();
   
   return combined.sort((a, b) => {
-    if (a.category === 'user_custom' && b.category !== 'user_custom') return -1;
-    if (a.category !== 'user_custom' && b.category === 'user_custom') return 1;
+    // USER_PRIORITY always first
+    if (a.tier === 'USER_PRIORITY' && b.tier !== 'USER_PRIORITY') return -1;
+    if (a.tier !== 'USER_PRIORITY' && b.tier === 'USER_PRIORITY') return 1;
 
-    // Prioritize critical tier
+    // CRITICAL tier second
     if (a.tier === 'CRITICAL' && b.tier !== 'CRITICAL') return -1;
     if (a.tier !== 'CRITICAL' && b.tier === 'CRITICAL') return 1;
 
@@ -2052,23 +921,11 @@ interface ChannelCache {
   messages: TelegramMessage[];
   timestamp: number;
   lastSuccessIso?: string;
-  error?: string;
 }
 
 const telegramCache: Record<string, ChannelCache> = {};
-const TG_CACHE_TTL_MS = 45000;
-
-function decodeHtmlEntities(str: string): string {
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#33;/g, '!')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)));
-}
+let rollingBatchIndex = 0;
+let lastKnownSuccessfulCycleTs: number = 0;
 
 export interface ChannelIngestStatus {
   channel: string;
@@ -2081,7 +938,7 @@ export interface ChannelIngestStatus {
   lastCheckTimestamp: number;
   error?: string;
   tier?: SourceTier;
-  hasWebPreview: boolean;
+  hasWebPreview?: boolean;
   statusCategory: 'healthy' | 'unavailable' | 'disabled';
 }
 
@@ -2091,38 +948,54 @@ export interface TelegramIngestMetrics {
   healthyCount: number;
   unavailableCount: number;
   disabledCount: number;
+  userPriorityTotal: number;
+  userPriorityHealthy: number;
+  userPriorityUnavailable: number;
   criticalTotal: number;
   criticalHealthy: number;
+  criticalError: number;
+  regionalTotal: number;
+  regionalHealthy: number;
+  regionalUnavailable: number;
+  temporarilyUnavailableCount: number;
+  removedUnusableCount: number;
   lastSuccessfulCycleTs: number;
   lastRealDataTimestamp: number;
   lastRealDataIso: string | null;
 }
 
-let rollingBatchIndex = 0;
-let lastKnownSuccessfulCycleTs = 0;
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
 
-export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ messages: TelegramMessage[]; error?: string }> {
-  // If channel is explicitly marked as having no public web preview in Telegram
-  if (channel.hasWebPreview === false) {
-    return { messages: [], error: channel.reason || 'Немає публічного веб-прев’ю в Telegram' };
-  }
-
+export async function fetchChannelMessages(
+  channel: ChannelConfig
+): Promise<{ messages: TelegramMessage[]; error?: string }> {
   const now = Date.now();
   const cached = telegramCache[channel.username];
 
-  if (cached && (now - cached.timestamp) < TG_CACHE_TTL_MS && cached.messages.length > 0) {
+  // Quick 15-second cache per channel to prevent spamming
+  if (cached && (now - cached.timestamp) < 15000) {
     return { messages: cached.messages };
   }
 
-  const targetUrl = 'https://t.me/s/' + channel.username;
+  const cleanUser = channel.username.trim().replace(/^@/, '');
+  const targetUrl = 'https://t.me/s/' + cleanUser;
   const isBrowser = typeof window !== 'undefined';
+
   const fetchUrls: string[] = [];
 
   if (!isBrowser) {
     fetchUrls.push(targetUrl);
   }
-  fetchUrls.push(`https://proxy.cors.sh/${targetUrl}`);
-  fetchUrls.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`);
+  fetchUrls.push('https://proxy.cors.sh/' + targetUrl);
+  fetchUrls.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl));
 
   for (const url of fetchUrls) {
     try {
@@ -2217,40 +1090,36 @@ export async function fetchAllTelegramFeeds(
 
   const allAvailable = getPrioritizedChannels(userOblast, customChannels);
   
-  // Separate into active channels with web preview and unsupported channels
-  const activeChannels = allAvailable.filter(c => c.hasWebPreview !== false && c.enabled !== false);
-  const disabledChannels = allAvailable.filter(c => c.hasWebPreview === false || c.enabled === false);
-
-  // Fill status for disabled / no-web-preview channels upfront without wasting network
-  disabledChannels.forEach(ch => {
-    sourceStatus[ch.username] = {
-      channel: ch.username,
-      title: ch.title,
-      ok: false,
-      count: 0,
-      lastCheckTimestamp: now,
-      error: ch.reason || 'Немає публічного веб-прев’ю в Telegram',
-      tier: ch.tier || 'TACTICAL',
-      hasWebPreview: false,
-      statusCategory: 'disabled'
-    };
-  });
+  // All channels in the cleaned catalog are verified to have web preview
+  const activeChannels = allAvailable.filter(c => c.enabled !== false);
 
   // TIERED POLLING ARCHITECTURE:
-  // 1. Critical channels (Tier 1: National Radars + Local Oblast Radars) - ALWAYS POLLED EVERY CYCLE
-  const criticalChannels = activeChannels.filter(c => c.tier === 'CRITICAL' || (userOblast && (c.region.includes(userOblast) || userOblast.includes(c.region))));
-  const criticalUsernames = new Set(criticalChannels.map(c => c.username));
+  // 1. USER PRIORITY CHANNELS - ALWAYS POLLED EVERY CYCLE
+  const userPriorityChannels = activeChannels.filter(c => c.tier === 'USER_PRIORITY');
 
-  // 2. Rolling batch from remaining active tactical/OSINT channels
-  const remainingActive = activeChannels.filter(c => !criticalUsernames.has(c.username));
+  // 2. CRITICAL CHANNELS - ALWAYS POLLED EVERY CYCLE
+  const criticalChannels = activeChannels.filter(c => c.tier === 'CRITICAL');
+
+  // Set of all mandatory "Every Cycle" channels
+  const mandatoryUsernames = new Set([
+    ...userPriorityChannels.map(c => c.username.toLowerCase()),
+    ...criticalChannels.map(c => c.username.toLowerCase())
+  ]);
+
+  // 3. REGIONAL / OTHER CHANNELS - POLLED IN ROTATING BATCHES
+  const regionalChannels = activeChannels.filter(c => !mandatoryUsernames.has(c.username.toLowerCase()));
   const BATCH_SIZE = 15;
-  const startIndex = (rollingBatchIndex * BATCH_SIZE) % Math.max(1, remainingActive.length);
-  const selectedBatch = remainingActive.slice(startIndex, startIndex + BATCH_SIZE);
-  rollingBatchIndex = (rollingBatchIndex + 1) % Math.max(1, Math.ceil(remainingActive.length / BATCH_SIZE));
+  const startIndex = (rollingBatchIndex * BATCH_SIZE) % Math.max(1, regionalChannels.length);
+  const selectedBatch = regionalChannels.slice(startIndex, startIndex + BATCH_SIZE);
+  rollingBatchIndex = (rollingBatchIndex + 1) % Math.max(1, Math.ceil(regionalChannels.length / BATCH_SIZE));
 
-  const channelsToQueryThisCycle = [...criticalChannels, ...selectedBatch];
+  const channelsToQueryThisCycle = [
+    ...userPriorityChannels,
+    ...criticalChannels,
+    ...selectedBatch
+  ];
 
-  // Concurrently fetch this cycle's channels (limited to ~25-30 requests, fast & safe)
+  // Concurrently fetch this cycle's channels
   const results = await Promise.allSettled(
     channelsToQueryThisCycle.map(ch => fetchChannelMessages(ch))
   );
@@ -2291,8 +1160,8 @@ export async function fetchAllTelegramFeeds(
     }
   });
 
-  // Pull existing cache for channels not queried in this specific micro-cycle
-  activeChannels.forEach(ch => {
+  // Pull existing cache for regional channels not queried in this specific micro-cycle
+  regionalChannels.forEach(ch => {
     if (!sourceStatus[ch.username]) {
       const cached = telegramCache[ch.username];
       if (cached && cached.messages.length > 0) {
@@ -2333,9 +1202,18 @@ export async function fetchAllTelegramFeeds(
   // Calculate Metrics
   const healthyCount = Object.values(sourceStatus).filter(s => s.statusCategory === 'healthy').length;
   const unavailableCount = Object.values(sourceStatus).filter(s => s.statusCategory === 'unavailable').length;
-  const disabledCount = Object.values(sourceStatus).filter(s => s.statusCategory === 'disabled').length;
 
+  const userPriorityTotal = userPriorityChannels.length;
+  const userPriorityHealthy = userPriorityChannels.filter(c => sourceStatus[c.username]?.ok).length;
+  const userPriorityUnavailable = userPriorityTotal - userPriorityHealthy;
+
+  const criticalTotal = criticalChannels.length;
   const criticalHealthy = criticalChannels.filter(c => sourceStatus[c.username]?.ok).length;
+  const criticalError = criticalTotal - criticalHealthy;
+
+  const regionalTotal = regionalChannels.length;
+  const regionalHealthy = regionalChannels.filter(c => sourceStatus[c.username]?.ok).length;
+  const regionalUnavailable = regionalTotal - regionalHealthy;
 
   if (healthyCount > 0) {
     lastKnownSuccessfulCycleTs = now;
@@ -2353,9 +1231,18 @@ export async function fetchAllTelegramFeeds(
     monitoredSources: activeChannels.length,
     healthyCount,
     unavailableCount,
-    disabledCount,
-    criticalTotal: criticalChannels.length,
+    disabledCount: 0,
+    userPriorityTotal,
+    userPriorityHealthy,
+    userPriorityUnavailable,
+    criticalTotal,
     criticalHealthy,
+    criticalError,
+    regionalTotal,
+    regionalHealthy,
+    regionalUnavailable,
+    temporarilyUnavailableCount: unavailableCount,
+    removedUnusableCount: 98,
     lastSuccessfulCycleTs: lastKnownSuccessfulCycleTs || now,
     lastRealDataTimestamp: newestMessageTs,
     lastRealDataIso: newestMessageIso
@@ -2365,7 +1252,7 @@ export async function fetchAllTelegramFeeds(
 }
 
 export function getAllMonitoredSources(): ChannelConfig[] {
-  return MONITORED_CHANNELS;
+  return [...USER_PRIORITY_CHANNELS, ...MONITORED_CHANNELS];
 }
 
 export interface ClusterSourceEntry {

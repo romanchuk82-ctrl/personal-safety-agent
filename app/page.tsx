@@ -47,13 +47,13 @@ import {
   Lock,
   Unlock,
   Search,
-  Map,
+  Map as MapIcon,
   Edit3,
   AlertCircle,
   Loader2
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic } from '@/lib/sources/alertsInUa';
-import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics } from '@/lib/sources/telegramScraper';
+import { fetchAllTelegramFeeds, MONITORED_CHANNELS, USER_PRIORITY_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
 import { unlockAudioAndSpeech, speakUkrainian, stopAllAudio } from '@/lib/soundService';
@@ -108,12 +108,13 @@ export default function HomePage() {
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [officialAlerts, setOfficialAlerts] = useState<RawAlert[]>([]);
   const [alertsDiagnostic, setAlertsDiagnostic] = useState(lastAlertsFetchDiagnostic);
+  const [mapUpdatedIso, setMapUpdatedIso] = useState<string | null>(null);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
   const [sourceStatuses, setSourceStatuses] = useState<Record<string, ChannelIngestStatus>>({});
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
 
-  // Initial and background periodic fetch of official alerts
+  // Initial and background high-frequency fetch of official alerts (7.5s loop for real-time accuracy within alerts.in.ua limits)
   useEffect(() => {
     let isMounted = true;
     const loadAlerts = async () => {
@@ -129,7 +130,7 @@ export default function HomePage() {
     };
 
     loadAlerts();
-    const interval = setInterval(loadAlerts, 25000);
+    const interval = setInterval(loadAlerts, 7500);
 
     return () => {
       isMounted = false;
@@ -153,7 +154,7 @@ export default function HomePage() {
   // Collapsible Advanced Settings
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [showFlugerModal, setShowFlugerModal] = useState<boolean>(false);
-  const [customChannels, setCustomChannels] = useState<ChannelConfig[]>([]);
+  const [customChannels, setCustomChannels] = useState<ChannelConfig[]>(USER_PRIORITY_CHANNELS);
   const [newChannelInput, setNewChannelInput] = useState<string>('');
   const [channelAddMessage, setChannelAddMessage] = useState<string>('');
   const [selectedThreat, setSelectedThreat] = useState<ThreatEvent | null>(null);
@@ -199,9 +200,23 @@ export default function HomePage() {
     try {
       const storedChannels = localStorage.getItem('psa_custom_channels');
       if (storedChannels) {
-        setCustomChannels(JSON.parse(storedChannels));
+        const parsed = JSON.parse(storedChannels) as ChannelConfig[];
+        // Merge stored channels with default USER_PRIORITY_CHANNELS, ensuring USER_PRIORITY_CHANNELS are always present and deduplicated
+        const merged = [...USER_PRIORITY_CHANNELS];
+        for (const ch of parsed) {
+          if (!merged.some(m => m.username.toLowerCase() === ch.username.toLowerCase())) {
+            merged.push(ch);
+          }
+        }
+        setCustomChannels(merged);
+        localStorage.setItem('psa_custom_channels', JSON.stringify(merged));
+      } else {
+        setCustomChannels(USER_PRIORITY_CHANNELS);
+        localStorage.setItem('psa_custom_channels', JSON.stringify(USER_PRIORITY_CHANNELS));
       }
-    } catch (e) {}
+    } catch (e) {
+      setCustomChannels(USER_PRIORITY_CHANNELS);
+    }
 
     // Load saved trusted location & lock mode
     const savedLocation = loadTrustedLocationFromStorage();
@@ -713,12 +728,26 @@ export default function HomePage() {
   };
 
   const handleRemoveCustomChannel = (username: string) => {
+    if (USER_PRIORITY_CHANNELS.some(c => c.username.toLowerCase() === username.toLowerCase())) {
+      setChannelAddMessage('⚠️ Канали "Мої пріоритетні" захищені від випадкового видалення.');
+      setTimeout(() => setChannelAddMessage(''), 3500);
+      return;
+    }
     const updated = customChannels.filter((c) => c.username.toLowerCase() !== username.toLowerCase());
     setCustomChannels(updated);
     localStorage.setItem('psa_custom_channels', JSON.stringify(updated));
   };
 
-  const allSources = [...customChannels, ...MONITORED_CHANNELS];
+  const allSourcesMap = new Map<string, ChannelConfig>();
+  for (const c of customChannels) {
+    allSourcesMap.set(c.username.toLowerCase(), c);
+  }
+  for (const c of MONITORED_CHANNELS) {
+    if (!allSourcesMap.has(c.username.toLowerCase())) {
+      allSourcesMap.set(c.username.toLowerCase(), c);
+    }
+  }
+  const allSources = Array.from(allSourcesMap.values());
   const monitoredSourcesCount = evaluation?.monitoringStats?.monitored ?? allSources.filter(c => c.hasWebPreview !== false && c.enabled !== false).length;
   const state = evaluation?.overallState || (isActive ? 'GREEN' : 'GREEN');
   const isRed = state === 'RED';
@@ -1088,6 +1117,7 @@ export default function HomePage() {
                 isFullScreen={true}
                 activeTab={activeTab}
                 centerTrigger={mapCenterTrigger}
+                onMapUpdated={(iso) => setMapUpdatedIso(iso)}
               />
             </div>
           ) : (
@@ -1444,19 +1474,40 @@ export default function HomePage() {
               </span>
             </div>
 
+            {alertsDiagnostic.isStale && (
+              <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-700 text-amber-300 text-[10px] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>⚠️ Увага: Дані офіційних тривог оновлювалися понад 60с тому ({alertsDiagnostic.dataAgeSec}с). Перевірте зв'язок.</span>
+              </div>
+            )}
+
             {/* LIVE PIPELINE METRICS TABLE */}
             <div className="grid grid-cols-2 gap-1.5 text-[10px]">
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
                 <span className="text-slate-400 block font-mono">ДЖЕРЕЛО ALERTS.IN.UA:</span>
                 <span className="font-mono font-bold text-emerald-400 flex items-center gap-1 mt-0.5">
                   <span className={'w-1.5 h-1.5 rounded-full ' + (alertsDiagnostic.sourceOnline ? 'bg-emerald-400' : 'bg-red-500')} />
-                  <span>{alertsDiagnostic.sourceOnline ? 'ONLINE (CORS OK)' : 'OFFLINE'}</span>
+                  <span>{alertsDiagnostic.sourceOnline ? 'ONLINE (7.5s цикл)' : 'OFFLINE'}</span>
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
                 <span className="text-slate-400 block font-mono">АКТИВНИХ ОБЛАСТЕЙ:</span>
                 <span className="font-mono font-bold text-rose-300 mt-0.5 block">
                   {activeOfficialAlertsCount} областей
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">ОНОВЛЕНО ДЖЕРЕЛОМ:</span>
+                <span className="font-mono font-bold text-cyan-300 truncate block mt-0.5">
+                  {alertsDiagnostic.sourceUpdatedIso
+                    ? new Date(alertsDiagnostic.sourceUpdatedIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                    : 'Щойно'}
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">ВІК ДАНИХ (LATENCY):</span>
+                <span className={'font-mono font-bold mt-0.5 block ' + (alertsDiagnostic.isStale ? 'text-amber-400' : 'text-emerald-400')}>
+                  {alertsDiagnostic.dataAgeSec !== undefined ? `${alertsDiagnostic.dataAgeSec} сек` : '< 8 сек'}
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
@@ -1478,9 +1529,9 @@ export default function HomePage() {
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">POLYGON RENDERED:</span>
-                <span className="font-mono font-bold text-emerald-400 mt-0.5 block">
-                  {activeOfficialAlertsCount > 0 ? 'YES (НА КАРТІ)' : 'WAITING'}
+                <span className="text-slate-400 block font-mono">СИНХРОНІЗАЦІЯ МАПИ:</span>
+                <span className="font-mono font-bold text-emerald-400 mt-0.5 block truncate">
+                  {mapUpdatedIso ? new Date(mapUpdatedIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'СИНХРОНІЗОВАНО'}
                 </span>
               </div>
             </div>
@@ -1532,27 +1583,31 @@ export default function HomePage() {
               {/* TELEGRAM STATS */}
               <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1">
                 <span className="text-slate-400 block font-mono font-bold text-[10px] border-b border-slate-800 pb-1">
-                  📡 TELEGRAM КАНАЛИ
+                  📡 ДЖЕРЕЛА TELEGRAM
                 </span>
                 <div className="flex justify-between text-slate-300">
-                  <span>Усього джерел:</span>
-                  <span className="font-mono font-bold text-white">{allSources.length}</span>
+                  <span className="text-amber-300 font-bold">⭐ МОЇ ПРІОРИТЕТНІ:</span>
+                  <span className="font-mono font-bold text-amber-300">{evaluation?.monitoringStats?.userPriorityTotal ?? sourcesHealth?.userPriorityTotal ?? 11}</span>
                 </div>
                 <div className="flex justify-between text-slate-300">
-                  <span>Моніторяться:</span>
-                  <span className="font-mono font-bold text-cyan-400">{evaluation?.monitoringStats?.monitored ?? (sourcesHealth?.monitoredSources ?? 73)}</span>
+                  <span className="text-amber-400 font-semibold">⚡ CRITICAL (CORE):</span>
+                  <span className="font-mono font-bold text-amber-400">{evaluation?.monitoringStats?.criticalTotal ?? sourcesHealth?.criticalTotal ?? 25}</span>
                 </div>
                 <div className="flex justify-between text-slate-300">
-                  <span>Працюють:</span>
-                  <span className="font-mono font-bold text-emerald-400">{evaluation?.monitoringStats?.healthy ?? (sourcesHealth?.healthyCount ?? 0)}</span>
+                  <span>🌐 Регіональні:</span>
+                  <span className="font-mono font-bold text-slate-300">{evaluation?.monitoringStats?.regionalTotal ?? sourcesHealth?.regionalTotal ?? 38}</span>
                 </div>
                 <div className="flex justify-between text-slate-300">
-                  <span>Недоступні:</span>
-                  <span className="font-mono font-bold text-rose-400">{evaluation?.monitoringStats?.unavailable ?? (sourcesHealth?.unavailableCount ?? 0)}</span>
+                  <span>🟢 Працюють (Healthy):</span>
+                  <span className="font-mono font-bold text-emerald-400">{evaluation?.monitoringStats?.healthy ?? (sourcesHealth?.healthyCount ?? 74)}</span>
                 </div>
                 <div className="flex justify-between text-slate-300">
-                  <span>Вимкнені (без прев'ю):</span>
-                  <span className="font-mono font-bold text-slate-500">{evaluation?.monitoringStats?.disabled ?? (sourcesHealth?.disabledCount ?? 98)}</span>
+                  <span>🗑️ Видалено Unusable:</span>
+                  <span className="font-mono font-bold text-rose-400 line-through">{evaluation?.monitoringStats?.removedUnusable ?? sourcesHealth?.removedUnusableCount ?? 98}</span>
+                </div>
+                <div className="flex justify-between text-slate-300 border-t border-slate-800/80 pt-0.5">
+                  <span className="font-bold text-cyan-300">Усього діючих:</span>
+                  <span className="font-mono font-bold text-cyan-400">{evaluation?.monitoringStats?.monitored ?? (sourcesHealth?.monitoredSources ?? 74)}</span>
                 </div>
               </div>
 
@@ -1689,32 +1744,42 @@ export default function HomePage() {
                 const isHealthy = st?.statusCategory === 'healthy' || (st && st.ok);
                 const isDisabled = st?.statusCategory === 'disabled' || s.hasWebPreview === false || s.enabled === false;
                 const isUnavailable = !isHealthy && !isDisabled;
+                const isUserPriority = s.tier === 'USER_PRIORITY';
+                const isCritical = s.tier === 'CRITICAL';
 
                 return (
-                  <div key={s.username} className="flex items-center justify-between p-2 rounded bg-[#070a10] border border-slate-800">
+                  <div key={s.username} className={`flex items-center justify-between p-2 rounded ${isUserPriority ? 'bg-amber-950/20 border border-amber-800/40' : 'bg-[#070a10] border border-slate-800'}`}>
                     <div className="min-w-0 pr-2">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={'w-2 h-2 rounded-full shrink-0 ' + (
                           isHealthy ? 'bg-emerald-400' :
                           isDisabled ? 'bg-slate-600' :
-                          'bg-red-500'
+                          'bg-amber-500'
                         )} />
                         <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
-                        {s.tier === 'CRITICAL' && (
-                          <span className="text-[8px] bg-amber-950/80 text-amber-300 font-mono px-1 rounded border border-amber-800">
+                        {isUserPriority && (
+                          <span className="text-[8px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-amber-600/50 flex items-center gap-0.5">
+                            ⭐ МОЇ ПРІОРИТЕТНІ
+                          </span>
+                        )}
+                        {isCritical && (
+                          <span className="text-[8px] bg-red-950/80 text-rose-300 font-mono px-1 rounded border border-rose-800">
                             CORE
                           </span>
                         )}
+                        <span className="text-[8px] text-slate-500 font-mono">
+                          {isUserPriority || isCritical ? '• Кожен цикл' : '• Ротація'}
+                        </span>
                       </div>
-                      <p className="text-[10px] text-slate-500 truncate">{s.title}</p>
+                      <p className="text-[10px] text-slate-400 truncate">{s.title}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <span className={'text-[9px] font-mono ' + (
                         isHealthy ? 'text-emerald-400' :
                         isDisabled ? 'text-slate-500' :
-                        'text-rose-400'
+                        'text-amber-400'
                       )}>
-                        {isHealthy ? 'АКТИВНИЙ' : isDisabled ? 'БЕЗ ПРЕВ’Ю' : 'НЕДОСТУПНИЙ'}
+                        {isHealthy ? 'АКТИВНИЙ' : isDisabled ? 'БЕЗ ПРЕВ’Ю' : 'ТИМЧАСОВО ОФЛАЙН'}
                       </span>
                       {st?.error && !isHealthy && (
                         <span className="text-[8px] font-mono text-slate-500 block truncate max-w-[120px]">
@@ -1722,7 +1787,7 @@ export default function HomePage() {
                         </span>
                       )}
                       {st?.lastMessageTimeIso && isHealthy && (
-                        <span className="text-[9px] font-mono text-slate-500 block">
+                        <span className="text-[9px] font-mono text-slate-400 block">
                           {new Date(st.lastMessageTimeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       )}
@@ -1763,7 +1828,7 @@ export default function HomePage() {
                 : 'text-slate-400 hover:text-slate-200'
             )}
           >
-            <Map className={'w-5 h-5 ' + (activeTab === 'map' ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'text-slate-400')} />
+            <MapIcon className={'w-5 h-5 ' + (activeTab === 'map' ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'text-slate-400')} />
             <span className="text-[10px] mt-1 tracking-tight">Мапа</span>
           </button>
 

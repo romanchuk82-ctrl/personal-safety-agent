@@ -15,15 +15,21 @@ export interface RawAlert {
 interface CacheEntry {
   data: RawAlert[];
   timestamp: number;
+  sourceUpdatedIso: string;
 }
 
 let alertsCache: CacheEntry | null = null;
-const CACHE_TTL_MS = 25000;
+const CACHE_TTL_MS = 5000; // 5 seconds cache for real-time responsiveness
 
 export interface AlertsDiagnostic {
   sourceOnline: boolean;
   status: 'OK' | 'CACHE' | 'ERROR';
   activeAlertsCount: number;
+  sourceUpdatedIso: string;
+  receivedByAgentIso: string;
+  mapUpdatedIso?: string;
+  dataAgeSec: number;
+  isStale: boolean;
   lastFetchTime: string;
   errorDetails?: string;
   usedProxy?: string;
@@ -33,22 +39,39 @@ export let lastAlertsFetchDiagnostic: AlertsDiagnostic = {
   sourceOnline: false,
   status: 'ERROR',
   activeAlertsCount: 0,
+  sourceUpdatedIso: '',
+  receivedByAgentIso: '',
+  dataAgeSec: 0,
+  isStale: false,
   lastFetchTime: ''
 };
 
-export async function fetchActiveAlerts(token?: string): Promise<{ alerts: RawAlert[]; status: 'OK' | 'CACHE' | 'ERROR'; message?: string }> {
+export async function fetchActiveAlerts(token?: string): Promise<{
+  alerts: RawAlert[];
+  status: 'OK' | 'CACHE' | 'ERROR';
+  diagnostic?: AlertsDiagnostic;
+  message?: string;
+}> {
   const apiToken = token || process.env.ALERTS_API_TOKEN || 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
   const now = Date.now();
   const isBrowser = typeof window !== 'undefined';
 
   if (alertsCache && (now - alertsCache.timestamp) < CACHE_TTL_MS) {
+    const dataAgeSec = alertsCache.sourceUpdatedIso
+      ? Math.max(0, Math.floor((now - new Date(alertsCache.sourceUpdatedIso).getTime()) / 1000))
+      : Math.max(0, Math.floor((now - alertsCache.timestamp) / 1000));
+
     lastAlertsFetchDiagnostic = {
       sourceOnline: true,
       status: 'CACHE',
       activeAlertsCount: (alertsCache.data || []).filter(a => !a.finished_at).length,
+      sourceUpdatedIso: alertsCache.sourceUpdatedIso,
+      receivedByAgentIso: new Date(alertsCache.timestamp).toISOString(),
+      dataAgeSec,
+      isStale: dataAgeSec > 60,
       lastFetchTime: new Date(alertsCache.timestamp).toISOString()
     };
-    return { alerts: alertsCache.data, status: 'CACHE' };
+    return { alerts: [...alertsCache.data], status: 'CACHE', diagnostic: lastAlertsFetchDiagnostic };
   }
 
   const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${apiToken}`;
@@ -84,7 +107,7 @@ export async function fetchActiveAlerts(token?: string): Promise<{ alerts: RawAl
   for (const endpoint of candidateEndpoints) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
       const res = await fetch(endpoint.url, {
         headers: endpoint.headers,
@@ -95,6 +118,7 @@ export async function fetchActiveAlerts(token?: string): Promise<{ alerts: RawAl
 
       if (res.ok) {
         let alerts: RawAlert[] = [];
+        let sourceUpdatedIso = new Date(now).toISOString();
 
         if (endpoint.isJina) {
           const jinaJson = await res.json();
@@ -102,27 +126,46 @@ export async function fetchActiveAlerts(token?: string): Promise<{ alerts: RawAl
           if (rawContent) {
             const parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
             alerts = parsed.alerts || [];
+            if (parsed.meta?.last_updated_at) {
+              const dt = new Date(parsed.meta.last_updated_at);
+              if (!isNaN(dt.getTime())) {
+                sourceUpdatedIso = dt.toISOString();
+              }
+            }
           }
         } else {
           const data = await res.json();
           alerts = data.alerts || [];
+          if (data.meta?.last_updated_at) {
+            const dt = new Date(data.meta.last_updated_at);
+            if (!isNaN(dt.getTime())) {
+              sourceUpdatedIso = dt.toISOString();
+            }
+          }
         }
 
         if (Array.isArray(alerts)) {
           alertsCache = {
             data: alerts,
-            timestamp: now
+            timestamp: now,
+            sourceUpdatedIso
           };
+
+          const dataAgeSec = Math.max(0, Math.floor((now - new Date(sourceUpdatedIso).getTime()) / 1000));
 
           lastAlertsFetchDiagnostic = {
             sourceOnline: true,
             status: 'OK',
             activeAlertsCount: alerts.filter(a => !a.finished_at).length,
+            sourceUpdatedIso,
+            receivedByAgentIso: new Date(now).toISOString(),
+            dataAgeSec,
+            isStale: dataAgeSec > 60,
             lastFetchTime: new Date(now).toISOString(),
             usedProxy: endpoint.name
           };
 
-          return { alerts, status: 'OK' };
+          return { alerts: [...alerts], status: 'OK', diagnostic: lastAlertsFetchDiagnostic };
         }
       }
     } catch (err: any) {
@@ -131,25 +174,37 @@ export async function fetchActiveAlerts(token?: string): Promise<{ alerts: RawAl
   }
 
   if (alertsCache) {
+    const dataAgeSec = alertsCache.sourceUpdatedIso
+      ? Math.max(0, Math.floor((now - new Date(alertsCache.sourceUpdatedIso).getTime()) / 1000))
+      : Math.max(0, Math.floor((now - alertsCache.timestamp) / 1000));
+
     lastAlertsFetchDiagnostic = {
       sourceOnline: true,
       status: 'CACHE',
       activeAlertsCount: (alertsCache.data || []).filter(a => !a.finished_at).length,
+      sourceUpdatedIso: alertsCache.sourceUpdatedIso,
+      receivedByAgentIso: new Date(alertsCache.timestamp).toISOString(),
+      dataAgeSec,
+      isStale: dataAgeSec > 60,
       lastFetchTime: new Date(alertsCache.timestamp).toISOString(),
       errorDetails: 'Fallback to cached alerts'
     };
-    return { alerts: alertsCache.data, status: 'CACHE', message: 'Fallback to cache' };
+    return { alerts: [...alertsCache.data], status: 'CACHE', diagnostic: lastAlertsFetchDiagnostic, message: 'Fallback to cache' };
   }
 
   lastAlertsFetchDiagnostic = {
     sourceOnline: false,
     status: 'ERROR',
     activeAlertsCount: 0,
+    sourceUpdatedIso: '',
+    receivedByAgentIso: '',
+    dataAgeSec: 999,
+    isStale: true,
     lastFetchTime: new Date(now).toISOString(),
     errorDetails: 'Could not fetch active alerts via candidate endpoints'
   };
 
-  return { alerts: [], status: 'ERROR', message: 'Could not fetch active alerts' };
+  return { alerts: [], status: 'ERROR', diagnostic: lastAlertsFetchDiagnostic, message: 'Could not fetch active alerts' };
 }
 
 /**

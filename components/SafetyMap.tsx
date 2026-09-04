@@ -55,6 +55,7 @@ interface SafetyMapProps {
   isFullScreen?: boolean;
   activeTab?: string;
   centerTrigger?: number;
+  onMapUpdated?: (iso: string) => void;
 }
 
 // Helper to compute zoom level based on monitoring radius
@@ -115,7 +116,8 @@ export default function SafetyMap({
   isOrange,
   isFullScreen = false,
   activeTab,
-  centerTrigger
+  centerTrigger,
+  onMapUpdated
 }: SafetyMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -330,7 +332,11 @@ export default function SafetyMap({
 
     geoJsonLayer.addTo(map);
     officialAlertsLayerRef.current = geoJsonLayer;
-  }, [isMapReady, officialAlerts, showOfficialAlerts]);
+
+    if (onMapUpdated) {
+      onMapUpdated(new Date().toISOString());
+    }
+  }, [isMapReady, officialAlerts, showOfficialAlerts, onMapUpdated]);
 
   // 3. Update User Position & Monitoring Radius Circle
   useEffect(() => {
