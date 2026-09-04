@@ -52,6 +52,8 @@ interface SafetyMapProps {
   isActive: boolean;
   isRed: boolean;
   isOrange: boolean;
+  isFullScreen?: boolean;
+  activeTab?: string;
 }
 
 // Helper to compute zoom level based on monitoring radius
@@ -109,7 +111,9 @@ export default function SafetyMap({
   isMapPickerActive,
   isActive,
   isRed,
-  isOrange
+  isOrange,
+  isFullScreen = false,
+  activeTab
 }: SafetyMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -124,6 +128,17 @@ export default function SafetyMap({
   const [isMapReady, setIsMapReady] = useState(false);
   const [showOfficialAlerts, setShowOfficialAlerts] = useState<boolean>(true);
   const [currentZoom, setCurrentZoom] = useState(11);
+
+  // Invalidate size on tab switch or fullscreen toggle for crisp rendering
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const timer = setTimeout(() => {
+      try {
+        mapInstanceRef.current?.invalidateSize();
+      } catch {}
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [isFullScreen, activeTab]);
 
   // Map Click Handler for manual point picking
   useEffect(() => {
@@ -264,11 +279,11 @@ export default function SafetyMap({
 
         if (isAlertActive) {
           return {
-            fillColor: '#b91c1c', // Rich semi-transparent burgundy / crimson fill
-            fillOpacity: 0.28,   // High-contrast, clearly visible tint on dark map
-            weight: 2.0,         // Visible solid outline
+            fillColor: '#dc2626', // Vibrant crimson red
+            fillOpacity: 0.38,   // High-contrast, clearly visible tint on dark map
+            weight: 2.2,         // Visible solid outline
             color: '#ef4444',    // Bright red contour
-            opacity: 0.88,       // Clear visible border
+            opacity: 0.95,       // Clear visible border
             dashArray: ''        // Solid line for clean boundary visibility
           };
         }
@@ -521,7 +536,7 @@ export default function SafetyMap({
   const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
 
   return (
-    <div className="relative w-full rounded-3xl overflow-hidden border border-[#1a2538] bg-[#070b14] shadow-2xl transition-all">
+    <div className={'relative w-full rounded-3xl overflow-hidden border border-[#1a2538] bg-[#070b14] shadow-2xl transition-all ' + (isFullScreen ? 'h-full flex-1 flex flex-col min-h-[480px]' : '')}>
       {/* MAP TOP STATUS BAR */}
       <div className="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between gap-2 pointer-events-none">
         <div className="pointer-events-auto bg-[#0c1220]/95 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700/70 shadow-lg flex items-center gap-2 max-w-[65%] truncate">
@@ -578,8 +593,8 @@ export default function SafetyMap({
       {/* MAP CONTAINER FOR LEAFLET */}
       <div
         ref={mapContainerRef}
-        className="w-full h-[340px] z-0 focus:outline-none"
-        style={{ minHeight: '340px' }}
+        className={'w-full z-0 focus:outline-none ' + (isFullScreen ? 'flex-1 h-full min-h-[480px]' : 'h-[340px] min-h-[340px]')}
+        style={{ minHeight: isFullScreen ? '480px' : '340px' }}
       />
 
       {/* MAP CONTROLS (RIGHT SIDE) */}

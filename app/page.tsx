@@ -51,7 +51,7 @@ import {
   Edit3,
   AlertCircle
 } from 'lucide-react';
-import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert } from '@/lib/sources/alertsInUa';
+import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic } from '@/lib/sources/alertsInUa';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
@@ -93,6 +93,7 @@ const CITY_PRESETS = [
 ];
 
 export default function HomePage() {
+  const [activeTab, setActiveTab] = useState<'home' | 'map' | 'events' | 'settings'>('home');
   const [isActive, setIsActive] = useState<boolean>(false);
   const [trustedLocation, setTrustedLocation] = useState<TrustedLocation | null>(null);
   const [radiusKm, setRadiusKm] = useState<number>(15.0);
@@ -104,10 +105,35 @@ export default function HomePage() {
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [officialAlerts, setOfficialAlerts] = useState<RawAlert[]>([]);
+  const [alertsDiagnostic, setAlertsDiagnostic] = useState(lastAlertsFetchDiagnostic);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
   const [sourceStatuses, setSourceStatuses] = useState<Record<string, ChannelIngestStatus>>({});
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
+
+  // Initial and background periodic fetch of official alerts
+  useEffect(() => {
+    let isMounted = true;
+    const loadAlerts = async () => {
+      try {
+        const res = await fetchActiveAlerts();
+        if (isMounted) {
+          if (res.alerts) setOfficialAlerts(res.alerts);
+          setAlertsDiagnostic({ ...lastAlertsFetchDiagnostic });
+        }
+      } catch (err) {
+        console.error('Failed to load official alerts:', err);
+      }
+    };
+
+    loadAlerts();
+    const interval = setInterval(loadAlerts, 25000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
   
   // Location Manager & Search Modals
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
@@ -304,6 +330,7 @@ export default function HomePage() {
 
       setEvaluation(result);
       setOfficialAlerts(alertsRes.alerts || []);
+      setAlertsDiagnostic({ ...lastAlertsFetchDiagnostic });
       setLastCheckTime(new Date());
       setSecondsSinceCheck(0);
 
@@ -616,6 +643,10 @@ export default function HomePage() {
   const radarThreats = (evaluation?.threatEvents || []).filter(
     (t) => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.distanceKm === null || t.distanceKm <= 75)
   );
+  const activeEventsCount = (evaluation?.threatEvents || []).filter(
+    (t) => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID'
+  ).length;
+  const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
   const historyThreats = (evaluation?.historyEvents || []).filter(
     (t) => (t.status === 'stale' || t.status === 'cleared') && t.category !== 'GENERAL_AIR_RAID'
   );
@@ -675,316 +706,339 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* MAIN CONTAINER */}
-      <div className="max-w-md mx-auto px-4 pt-3">
+      {/* MAIN CONTAINER WITH BOTTOM PADDING FOR SAFE-AREA AND NAV BAR */}
+      <div className="max-w-md mx-auto px-4 pt-3 pb-24">
 
-        {/* LOCATION CONFIDENCE CONTROLS BAR (Auto / Lock / Manual) */}
-        <div className="mb-3 p-1.5 bg-[#0e1524] rounded-2xl border border-slate-800 shadow-lg">
-          <div className="grid grid-cols-3 gap-1 text-[11px] font-bold">
-            {/* AUTO GPS BUTTON */}
-            <button
-              onClick={handleSwitchToAutoGps}
-              className={'py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ' + (
-                trustedLocation?.lockMode === 'AUTO' && !isLocationUnreliable
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-              )}
-              title="Автоматичний GPS із захистом від аномалій координат"
-            >
-              <Radio className="w-3.5 h-3.5 text-blue-300" />
-              <span>📍 АВТО</span>
-            </button>
-
-            {/* LOCK BUTTON */}
-            <button
-              onClick={handleLockLocation}
-              className={'py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ' + (
-                isLocationLocked
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-              )}
-              title="Зафіксувати поточну точку: ігнорувати будь-які стрибки GPS"
-            >
-              <Lock className="w-3.5 h-3.5 text-indigo-300" />
-              <span>📌 ЗАФІКСУВАТИ</span>
-            </button>
-
-            {/* MANUAL / MAP PICKER BUTTON */}
-            <button
-              onClick={() => setShowLocationModal(true)}
-              className="py-2 px-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center justify-center gap-1.5 transition-all"
-              title="Обрати місто з пошуку або поставити точку на карті"
-            >
-              <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
-              <span>✏️ ВРУЧНУ</span>
-            </button>
-          </div>
-        </div>
-
-        {/* LOCATION SUCCESS / NOTICE MESSAGE */}
-        {locationSuccessNotice && (
-          <div className="mb-3 p-2 rounded-xl bg-indigo-950 text-indigo-200 text-xs font-bold text-center border border-indigo-700 animate-fadeIn flex items-center justify-center gap-1.5 shadow-md">
-            <Check className="w-3.5 h-3.5 text-indigo-300" />
-            <span>{locationSuccessNotice}</span>
-          </div>
-        )}
-
-        {/* VOICE QUICK CONTROLS */}
-        <div className="mb-3 flex items-center gap-2">
-          <button
-            onClick={handleManualVoiceTest}
-            className="flex-1 py-2 px-3 rounded-xl bg-blue-950/70 hover:bg-blue-900/70 text-blue-300 font-bold text-xs border border-blue-800/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
-          >
-            <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-            <span>ТЕСТ ГОЛОСУ ДИКТОРУ 🔊</span>
-          </button>
-          <button
-            onClick={() => handleToggleAudio()}
-            className={'py-2 px-3 rounded-xl font-bold text-xs border flex items-center justify-center gap-1.5 transition-all active:scale-95 ' + (
-              audioEnabled
-                ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
-                : 'bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border-amber-800/80'
-            )}
-          >
-            {audioEnabled ? <VolumeX className="w-3.5 h-3.5 text-slate-400" /> : <Volume2 className="w-3.5 h-3.5 text-amber-400" />}
-            <span>{audioEnabled ? 'Вимкнути' : 'Увімкнути'}</span>
-          </button>
-        </div>
-
-        {voiceStatusMessage && (
-          <div className="mb-3 p-2 rounded-xl bg-blue-950 text-blue-200 text-xs font-bold text-center border border-blue-700 animate-pulse">
-            {voiceStatusMessage}
-          </div>
-        )}
-
-        {/* GPS ANOMALY WARNING CARD (Appears if suspicious GPS jump detected) */}
-        {isLocationUnreliable && (
-          <div className="mb-4 bg-amber-950/90 border border-amber-500/80 rounded-2xl p-3.5 shadow-xl animate-fadeIn text-xs text-amber-200 space-y-2">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-bounce" />
-              <div>
-                <h3 className="font-bold text-amber-100 text-xs">⚠️ Геолокація нестабільна</h3>
-                <p className="text-[11px] text-amber-300/90 mt-0.5 leading-relaxed">
-                  Виявлено стрибок координат (можливий слабкий сигнал, multipath, indoor або інтерференція GNSS). Система використовує останню надійну точку:{' '}
-                  <strong>{trustedLocation?.name}</strong>. Моніторинг загроз не переривається!
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 pt-1 border-t border-amber-800/60 text-[11px]">
-              <button
-                onClick={handleLockLocation}
-                className="flex-1 py-1.5 px-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-all"
-              >
-                📌 Зафіксувати цю точку
-              </button>
-              <button
-                onClick={() => setShowLocationModal(true)}
-                className="py-1.5 px-2.5 bg-amber-900/80 hover:bg-amber-800 text-amber-200 font-semibold rounded-lg border border-amber-700 transition-all"
-              >
-                Вказати місто
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 1-SECOND READABILITY STATUS HERO CARD */}
-        <div className={'mb-4 rounded-3xl p-6 border transition-all duration-300 shadow-2xl ' + (
-          !isActive
-            ? 'bg-[#0f1420] border-[#1d273c]'
-            : isRed
-            ? 'bg-gradient-to-b from-[#3a0606] to-[#1e0505] border-red-500 ring-2 ring-red-500/50 shadow-red-950/80 animate-pulse-slow'
-            : isOrange
-            ? 'bg-gradient-to-b from-[#2d1804] to-[#180e03] border-amber-500 shadow-amber-950/60'
-            : isDegraded
-            ? 'bg-[#151a24] border-slate-700 shadow-slate-950/50'
-            : 'bg-gradient-to-b from-[#082015] to-[#05140e] border-emerald-500/60 shadow-emerald-950/40'
-        )}>
-          <div className="flex items-start justify-between">
-            <div>
-              <span className="text-[11px] font-mono tracking-wider uppercase text-slate-400">
-                {isActive ? 'ПОТОЧНИЙ СТАН СЕКТОРУ' : 'ГОТОВИЙ ДО ЗАПУСКУ'}
-              </span>
-              <h2 className="text-2xl font-black tracking-tight mt-1 text-white flex items-center gap-2">
-                {!isActive ? (
-                  <span>⚪ НЕ АКТИВОВАНО</span>
-                ) : isRed ? (
-                  <span className="text-red-400">🔴 НЕБЕЗПЕКА ПОРУЧ!</span>
-                ) : isOrange ? (
-                  <span className="text-amber-400">🟠 УВАГА В ОБЛАСТІ</span>
-                ) : isDegraded ? (
-                  <span className="text-slate-300">⚪ МОНІТОРИНГ НЕПОВНИЙ</span>
-                ) : (
-                  <span className="text-emerald-400">🟢 СЕКТОР ЧИСТИЙ</span>
-                )}
-              </h2>
-
-              {/* COMPACT OFFICIAL AIR RAID BADGE */}
-              {isUnderOfficialAlert && (
-                <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 text-rose-300 text-xs font-bold shadow-lg shadow-rose-950/40 animate-pulse">
-                  <span>⚠</span>
-                  <span>ОФІЦІЙНА ТРИВОГА</span>
-                  <span className="text-[10px] text-rose-400 font-mono">({trustedLocation?.oblast || 'Область'})</span>
-                </div>
-              )}
-            </div>
-            <div className={'p-3 rounded-2xl ' + (
-              !isActive ? 'bg-slate-800 text-slate-400' :
-              isRed ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-bounce' :
-              isOrange ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
-              isDegraded ? 'bg-slate-800 text-slate-400' :
-              'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-            )}>
-              {isRed ? <Flame className="w-7 h-7" /> : isOrange ? <AlertTriangle className="w-7 h-7" /> : isGreen ? <ShieldCheck className="w-7 h-7" /> : <Radio className="w-7 h-7" />}
-            </div>
-          </div>
-
-          <p className="text-xs text-slate-200 mt-3 leading-relaxed font-medium">
-            {!isActive
-              ? 'Натисніть кнопку «Активувати захист», заблокуйте iPhone та покладіть у кишеню. Система оголосить небезпеку голосом на замкненому екрані.'
-              : isRed
-              ? evaluation?.primaryThreat?.confidenceReason || 'Підтверджено пряму загрозу у вашому секторі! Негайно пройдіть в укриття!'
-              : isOrange
-              ? evaluation?.stateDescriptionUk || 'Ціль спостерігається в області / коридорі підльоту. Загрози для вашого мікрорайону наразі немає.'
-              : isDegraded
-              ? 'Дані застаріли або відсутній зв’язок із джерелами. Перевірте підключення до інтернету.'
-              : isUnderOfficialAlert
-              ? `В області оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
-              : evaluation?.stateDescriptionUk || 'Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор у реальному часі.'}
-          </p>
-
-          {/* TELEMETRY METRICS */}
-          {trustedLocation && (
-            <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-2 gap-2 text-xs">
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-400 block font-mono flex items-center justify-between">
-                  <span>📍 ВАША ЛОКАЦІЯ</span>
-                  {isLocationLocked ? <span className="text-indigo-400 font-bold">LOCKED 📌</span> : null}
-                </span>
-                <span className="font-bold text-white truncate block">{trustedLocation.name}</span>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {isLocationUnreliable
-                    ? '⚠️ Остання підтверджена позиція'
-                    : isLocationLocked
-                    ? '📌 Зафіксовано користувачем'
-                    : `GPS ±${Math.round(trustedLocation.accuracyMeters)}м`}
-                </span>
-              </div>
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-400 block font-mono">📡 ЗОНА ЗАХИСТУ</span>
-                <span className="font-bold text-white block">Радіус {radiusKm.toFixed(0)} км</span>
-                <span className="text-[10px] text-slate-400 font-mono">Флюгер Зона 1</span>
-              </div>
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ</span>
-                <span className="font-mono font-bold text-white block">{secondsSinceCheck}с тому</span>
-                <span className="text-[10px] text-emerald-400 font-mono">159 джерел</span>
-              </div>
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
-                <span className="font-bold text-white block">
-                  {audioEnabled ? '🔊 Голос диктора (Ajax)' : '🔇 Тихий режим'}
-                </span>
-                <span className={'text-[10px] font-mono ' + (audioEnabled ? 'text-blue-400' : 'text-amber-400')}>
-                  {audioEnabled ? 'Оголошення активне' : 'Без звуку'}
-                </span>
-              </div>
+        {/* ========================================================================= */}
+        {/* TAB 1: 🛡 ГОЛОВНА (WHAT'S HAPPENING WITH ME RIGHT NOW?) */}
+        {/* ========================================================================= */}
+        <div className={activeTab === 'home' ? 'block' : 'hidden'}>
+          {/* LOCATION SUCCESS / NOTICE MESSAGE */}
+          {locationSuccessNotice && (
+            <div className="mb-3 p-2 rounded-xl bg-indigo-950 text-indigo-200 text-xs font-bold text-center border border-indigo-700 animate-fadeIn flex items-center justify-center gap-1.5 shadow-md">
+              <Check className="w-3.5 h-3.5 text-indigo-300" />
+              <span>{locationSuccessNotice}</span>
             </div>
           )}
-        </div>
 
-        {/* PRIMARY ACTION BUTTONS */}
-        <div className="space-y-2.5 mb-5">
-          {!isActive ? (
-            <button
-              onClick={handleActivate}
-              disabled={isLoading}
-              className="w-full py-5 px-6 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-black text-lg tracking-wide shadow-xl shadow-blue-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-3 border border-blue-400/40"
-            >
-              {isLoading ? (
-                <>
-                  <RefreshCw className="w-6 h-6 animate-spin" />
-                  <span>ВАЛІДАЦІЯ СИГНАЛУ GPS ТА ЗАПУСК...</span>
-                </>
-              ) : (
-                <>
-                  <Radio className="w-6 h-6" />
-                  <span>АКТИВУВАТИ ЗАХИСТ</span>
-                </>
-              )}
-            </button>
-          ) : (
-            <div className="flex gap-2">
-              <button
-                onClick={handleDeactivate}
-                className="flex-1 py-4 px-4 rounded-2xl bg-[#161e2e] hover:bg-slate-800 text-slate-300 hover:text-white font-bold text-sm tracking-wide border border-slate-700/80 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-              >
-                <ShieldAlert className="w-4 h-4 text-red-400" />
-                <span>ЗУПИНИТИ МОНІТОРИНГ</span>
-              </button>
+          {voiceStatusMessage && (
+            <div className="mb-3 p-2 rounded-xl bg-blue-950 text-blue-200 text-xs font-bold text-center border border-blue-700 animate-pulse">
+              {voiceStatusMessage}
+            </div>
+          )}
 
-              {!isLocationLocked ? (
+          {/* GPS ANOMALY WARNING CARD (Appears if suspicious GPS jump detected) */}
+          {isLocationUnreliable && (
+            <div className="mb-4 bg-amber-950/90 border border-amber-500/80 rounded-2xl p-3.5 shadow-xl animate-fadeIn text-xs text-amber-200 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-bounce" />
+                <div>
+                  <h3 className="font-bold text-amber-100 text-xs">⚠️ Геолокація нестабільна</h3>
+                  <p className="text-[11px] text-amber-300/90 mt-0.5 leading-relaxed">
+                    Виявлено стрибок координат (можливий слабкий сигнал або інтерференція GNSS). Система використовує останню надійну точку:{' '}
+                    <strong>{trustedLocation?.name}</strong>. Моніторинг загроз не переривається!
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-1 border-t border-amber-800/60 text-[11px]">
                 <button
                   onClick={handleLockLocation}
-                  className="py-4 px-4 rounded-2xl bg-indigo-950/80 hover:bg-indigo-900/80 text-indigo-200 font-bold text-xs border border-indigo-700/70 flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
-                  title="Зафіксувати точку, щоб GPS не зміщував зону"
+                  className="flex-1 py-1.5 px-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-all"
                 >
-                  <Lock className="w-4 h-4 text-indigo-400" />
-                  <span>ЗАФІКСУВАТИ</span>
+                  📌 Зафіксувати цю точку
                 </button>
-              ) : (
                 <button
-                  onClick={handleSwitchToAutoGps}
-                  className="py-4 px-4 rounded-2xl bg-blue-950/80 hover:bg-blue-900/80 text-blue-200 font-bold text-xs border border-blue-700/70 flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
-                  title="Повернутися до авто-GPS"
+                  onClick={() => setShowLocationModal(true)}
+                  className="py-1.5 px-2.5 bg-amber-900/80 hover:bg-amber-800 text-amber-200 font-semibold rounded-lg border border-amber-700 transition-all"
                 >
-                  <Unlock className="w-4 h-4 text-blue-400" />
-                  <span>АВТО-GPS</span>
+                  Вказати місто
                 </button>
-              )}
+              </div>
             </div>
           )}
 
-          {/* REAL PUSH TEST BUTTON */}
-          <button
-            onClick={startEmergencyPushTest}
-            className="w-full py-3.5 px-4 rounded-2xl bg-[#121926] hover:bg-[#1a2436] text-amber-300 hover:text-amber-200 font-bold text-xs tracking-wide border border-amber-500/40 flex items-center justify-center gap-2 transition-all shadow-md"
-          >
-            <Bell className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>ПЕРЕВІРИТИ ГОЛОС НА ЗАМКНЕНОМУ ЕКРАНІ (5С)</span>
-          </button>
-        </div>
+          {/* 1-SECOND READABILITY STATUS HERO CARD */}
+          <div className={'mb-4 rounded-3xl p-6 border transition-all duration-300 shadow-2xl ' + (
+            !isActive
+              ? 'bg-[#0f1420] border-[#1d273c]'
+              : isRed
+              ? 'bg-gradient-to-b from-[#3a0606] to-[#1e0505] border-red-500 ring-2 ring-red-500/50 shadow-red-950/80 animate-pulse-slow'
+              : isOrange
+              ? 'bg-gradient-to-b from-[#2d1804] to-[#180e03] border-amber-500 shadow-amber-950/60'
+              : isDegraded
+              ? 'bg-[#151a24] border-slate-700 shadow-slate-950/50'
+              : 'bg-gradient-to-b from-[#082015] to-[#05140e] border-emerald-500/60 shadow-emerald-950/40'
+          )}>
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="text-[11px] font-mono tracking-wider uppercase text-slate-400">
+                  {isActive ? 'ПОТОЧНИЙ СТАН СЕКТОРУ' : 'ГОТОВИЙ ДО ЗАПУСКУ'}
+                </span>
+                <h2 className="text-2xl font-black tracking-tight mt-1 text-white flex items-center gap-2">
+                  {!isActive ? (
+                    <span>⚪ НЕ АКТИВОВАНО</span>
+                  ) : isRed ? (
+                    <span className="text-red-400">🔴 НЕБЕЗПЕКА ПОРУЧ!</span>
+                  ) : isOrange ? (
+                    <span className="text-amber-400">🟠 УВАГА В ОБЛАСТІ</span>
+                  ) : isDegraded ? (
+                    <span className="text-slate-300">⚪ МОНІТОРИНГ НЕПОВНИЙ</span>
+                  ) : (
+                    <span className="text-emerald-400">🟢 СЕКТОР ЧИСТИЙ</span>
+                  )}
+                </h2>
 
-        {/* INTERACTIVE SAFETY MAP */}
-        {trustedLocation && (
-          <div className="mb-4">
-            <SafetyMap
-              userLocation={trustedLocation}
-              radiusKm={radiusKm}
-              threats={radarThreats}
-              officialAlerts={officialAlerts}
-              isUserUnderOfficialAlert={isUnderOfficialAlert}
-              selectedThreat={selectedThreat}
-              onSelectThreat={setSelectedThreat}
-              onSelectMapLocation={(lat, lng) => handleSelectManualLocation(lat, lng)}
-              isActive={isActive}
-              isRed={isRed}
-              isOrange={isOrange}
-            />
-          </div>
-        )}
-
-        {/* ACTIVE THREATS & OBSERVATIONS LIST */}
-        {radarThreats.length > 0 && (
-          <div className="mb-4 space-y-2">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-blue-400" />
-                <span>Виявлені цілі та спостереження ({radarThreats.length})</span>
-              </span>
-              <span className="text-[10px] text-slate-500 font-mono">Фільтр: до 75 км</span>
+                {/* COMPACT OFFICIAL AIR RAID BADGE */}
+                {isUnderOfficialAlert && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 text-rose-300 text-xs font-bold shadow-lg shadow-rose-950/40 animate-pulse">
+                    <span>⚠</span>
+                    <span>ОФІЦІЙНА ТРИВОГА</span>
+                    <span className="text-[10px] text-rose-400 font-mono">({trustedLocation?.oblast || 'Область'})</span>
+                  </div>
+                )}
+              </div>
+              <div className={'p-3 rounded-2xl ' + (
+                !isActive ? 'bg-slate-800 text-slate-400' :
+                isRed ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-bounce' :
+                isOrange ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
+                isDegraded ? 'bg-slate-800 text-slate-400' :
+                'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+              )}>
+                {isRed ? <Flame className="w-7 h-7" /> : isOrange ? <AlertTriangle className="w-7 h-7" /> : isGreen ? <ShieldCheck className="w-7 h-7" /> : <Radio className="w-7 h-7" />}
+              </div>
             </div>
 
-            <div className="space-y-2">
+            <p className="text-xs text-slate-200 mt-3 leading-relaxed font-medium">
+              {!isActive
+                ? 'Натисніть кнопку «Активувати захист», заблокуйте iPhone та покладіть у кишеню. Система оголосить небезпеку голосом на замкненому екрані.'
+                : isRed
+                ? evaluation?.primaryThreat?.confidenceReason || 'Підтверджено пряму загрозу у вашому секторі! Негайно пройдіть в укриття!'
+                : isOrange
+                ? evaluation?.stateDescriptionUk || 'Ціль спостерігається в області / коридорі підльоту. Загрози для вашого мікрорайону наразі немає.'
+                : isDegraded
+                ? 'Дані застаріли або відсутній зв’язок із джерелами. Перевірте підключення до інтернету.'
+                : isUnderOfficialAlert
+                ? `В області оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
+                : evaluation?.stateDescriptionUk || 'Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор у реальному часі.'}
+            </p>
+
+            {/* TELEMETRY METRICS */}
+            {trustedLocation && (
+              <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block font-mono flex items-center justify-between">
+                    <span>📍 ВАША ЛОКАЦІЯ</span>
+                    {isLocationLocked ? <span className="text-indigo-400 font-bold">LOCKED 📌</span> : null}
+                  </span>
+                  <span className="font-bold text-white truncate block">{trustedLocation.name}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {isLocationUnreliable
+                      ? '⚠️ Остання підтверджена'
+                      : isLocationLocked
+                      ? '📌 Зафіксовано'
+                      : `GPS ±${Math.round(trustedLocation.accuracyMeters)}м`}
+                  </span>
+                </div>
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block font-mono">📡 ЗОНА ЗАХИСТУ</span>
+                  <span className="font-bold text-white block">Радіус {radiusKm.toFixed(0)} км</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Флюгер Зона 1</span>
+                </div>
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ</span>
+                  <span className="font-mono font-bold text-white block">{secondsSinceCheck}с тому</span>
+                  <span className="text-[10px] text-emerald-400 font-mono">159 джерел</span>
+                </div>
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
+                  <span className="font-bold text-white block">
+                    {audioEnabled ? '🔊 Голос Ajax' : '🔇 Тихий'}
+                  </span>
+                  <span className={'text-[10px] font-mono ' + (audioEnabled ? 'text-blue-400' : 'text-amber-400')}>
+                    {audioEnabled ? 'Оголошення активне' : 'Без звуку'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* PRIMARY ACTION BUTTONS (Start / Stop) */}
+          <div className="space-y-2.5 mb-4">
+            {!isActive ? (
+              <button
+                onClick={handleActivate}
+                disabled={isLoading}
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-black text-base tracking-wide shadow-xl shadow-blue-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-3 border border-blue-400/40"
+              >
+                {isLoading ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>ВАЛІДАЦІЯ СИГНАЛУ GPS ТА ЗАПУСК...</span>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-5 h-5" />
+                    <span>АКТИВУВАТИ ЗАХИСТ</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDeactivate}
+                  className="flex-1 py-3.5 px-4 rounded-2xl bg-[#161e2e] hover:bg-slate-800 text-slate-300 hover:text-white font-bold text-xs tracking-wide border border-slate-700/80 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                >
+                  <ShieldAlert className="w-4 h-4 text-red-400" />
+                  <span>ЗУПИНИТИ МОНІТОРИНГ</span>
+                </button>
+
+                {!isLocationLocked ? (
+                  <button
+                    onClick={handleLockLocation}
+                    className="py-3.5 px-4 rounded-2xl bg-indigo-950/80 hover:bg-indigo-900/80 text-indigo-200 font-bold text-xs border border-indigo-700/70 flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                    title="Зафіксувати точку, щоб GPS не зміщував зону"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>ЗАФІКСУВАТИ</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSwitchToAutoGps}
+                    className="py-3.5 px-4 rounded-2xl bg-blue-950/80 hover:bg-blue-900/80 text-blue-200 font-bold text-xs border border-blue-700/70 flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                    title="Повернутися до авто-GPS"
+                  >
+                    <Unlock className="w-3.5 h-3.5 text-blue-400" />
+                    <span>АВТО-GPS</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* VOICE TEST BUTTONS */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleManualVoiceTest}
+                className="py-2.5 px-3 rounded-xl bg-[#0f1728] hover:bg-blue-950/80 text-blue-300 font-bold text-[11px] border border-blue-900/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-blue-400" />
+                <span>ТЕСТ ГОЛОСУ 🔊</span>
+              </button>
+
+              <button
+                onClick={startEmergencyPushTest}
+                className="py-2.5 px-3 rounded-xl bg-[#141822] hover:bg-amber-950/80 text-amber-300 font-bold text-[11px] border border-amber-900/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
+              >
+                <Bell className="w-3.5 h-3.5 text-amber-400" />
+                <span>ТЕСТ НА ЕКРАНІ 🔒</span>
+              </button>
+            </div>
+          </div>
+
+          {/* QUICK SHORTCUT CARDS TO OTHER TABS */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <button
+              onClick={() => setActiveTab('map')}
+              className="p-3 rounded-2xl bg-[#0e1422] hover:bg-[#151f32] border border-slate-800 flex items-center justify-between text-left group transition-all"
+            >
+              <div>
+                <span className="text-[10px] text-slate-400 font-mono block">ПОВНИЙ ЕКРАН</span>
+                <span className="font-bold text-white group-hover:text-blue-300">🗺 Мапа сектора</span>
+              </div>
+              <span className="text-cyan-400 text-xs">→</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('events')}
+              className="p-3 rounded-2xl bg-[#0e1422] hover:bg-[#151f32] border border-slate-800 flex items-center justify-between text-left group transition-all"
+            >
+              <div>
+                <span className="text-[10px] text-slate-400 font-mono block">ЖУРНАЛ СИСТЕМИ</span>
+                <span className="font-bold text-white group-hover:text-amber-300">
+                  ◉ Події {activeEventsCount > 0 ? `(${activeEventsCount})` : ''}
+                </span>
+              </div>
+              <span className="text-amber-400 text-xs">→</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* TAB 2: 🗺 МАПА (WHAT'S AROUND ME?) */}
+        {/* ========================================================================= */}
+        <div className={activeTab === 'map' ? 'block h-[calc(100vh-140px)] min-h-[480px] flex flex-col' : 'hidden'}>
+          {trustedLocation ? (
+            <div className="h-full flex-1 flex flex-col">
+              <SafetyMap
+                userLocation={trustedLocation}
+                radiusKm={radiusKm}
+                threats={radarThreats}
+                officialAlerts={officialAlerts}
+                isUserUnderOfficialAlert={isUnderOfficialAlert}
+                selectedThreat={selectedThreat}
+                onSelectThreat={setSelectedThreat}
+                onSelectMapLocation={(lat, lng) => handleSelectManualLocation(lat, lng)}
+                isActive={isActive}
+                isRed={isRed}
+                isOrange={isOrange}
+                isFullScreen={true}
+                activeTab={activeTab}
+              />
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center p-6 text-center bg-[#0e1422] rounded-3xl border border-slate-800 text-slate-300 space-y-3">
+              <MapPin className="w-10 h-10 text-cyan-400 animate-bounce" />
+              <h3 className="font-bold text-sm text-white">Геолокація ще не встановлена</h3>
+              <p className="text-xs text-slate-400 max-w-xs">
+                Увімкніть Авто-GPS або оберіть місто вручну, щоб відобразити карту та радіус моніторингу.
+              </p>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={handleSwitchToAutoGps}
+                  className="py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl"
+                >
+                  📍 Увімкнути Авто-GPS
+                </button>
+                <button
+                  onClick={() => setShowLocationModal(true)}
+                  className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl"
+                >
+                  ✏️ Обрати місто
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ========================================================================= */}
+        {/* TAB 3: ◉ ПОДІЇ (WHAT DOES THE SYSTEM SEE?) */}
+        {/* ========================================================================= */}
+        <div className={activeTab === 'events' ? 'block' : 'hidden'}>
+          <div className="mb-3 flex items-center justify-between px-1">
+            <div>
+              <h2 className="text-sm font-black text-white flex items-center gap-1.5">
+                <Activity className="w-4 h-4 text-cyan-400" />
+                <span>Стрічка подій та спостережень</span>
+              </h2>
+              <p className="text-[11px] text-slate-400">Хронологічний журнал (найсвіжіше зверху)</p>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
+              Радіус {radiusKm} км
+            </span>
+          </div>
+
+          {/* ACTIVE THREATS & OBSERVATIONS LIST */}
+          {radarThreats.length === 0 ? (
+            <div className="p-6 rounded-3xl bg-[#0e1422] border border-slate-800/80 text-center space-y-2.5 mb-4">
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-sm text-white">Активних загроз не зафіксовано</h3>
+              <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+                159 радарних джерел сканують повітряний простір. У вашому секторі наразі чисто.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5 mb-4">
               {radarThreats.map((threat) => {
                 const isDirectThreat = threat.eventType === 'CONFIRMED_THREAT' || (threat.distanceKm !== null && threat.distanceKm <= radiusKm);
                 const isSelected = selectedThreat?.id === threat.id;
@@ -993,7 +1047,7 @@ export default function HomePage() {
                   <div
                     key={threat.id}
                     onClick={() => setSelectedThreat(isSelected ? null : threat)}
-                    className={'p-3 rounded-2xl border transition-all cursor-pointer shadow-md ' + (
+                    className={'p-3.5 rounded-2xl border transition-all cursor-pointer shadow-md ' + (
                       isSelected
                         ? isDirectThreat
                           ? 'bg-red-950/90 border-red-500 ring-1 ring-red-400'
@@ -1051,309 +1105,502 @@ export default function HomePage() {
                 );
               })}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* HISTORY THREATS (STALE / CLEARED) */}
-        {historyThreats.length > 0 && (
-          <details className="mb-4 bg-[#0a0e17] rounded-2xl border border-slate-800 p-3 text-xs">
-            <summary className="font-mono text-slate-400 uppercase tracking-wider cursor-pointer flex items-center justify-between select-none">
-              <span>📜 Історія цілей (застарілі / відбій) ({historyThreats.length})</span>
-              <span className="text-[10px] text-slate-500">розгорнути</span>
-            </summary>
-            <div className="mt-2.5 space-y-2">
-              {historyThreats.map((threat) => (
-                <div key={threat.id} className="p-2.5 rounded-xl bg-black/30 border border-slate-800/80 flex items-center justify-between text-slate-300">
-                  <div className="min-w-0 pr-2">
-                    <span className="font-bold text-xs block truncate text-slate-200">{threat.categoryNameUk}</span>
-                    <span className="text-[10px] text-slate-400 block truncate">📍 {threat.detectedLocation} ({threat.statusBadgeUk})</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-slate-500 shrink-0">{threat.ageMinutes} хв тому</span>
+          {/* SELECTED THREAT CARD */}
+          {selectedThreat && (
+            <div className="mb-4 bg-red-950/90 border border-red-500 rounded-2xl p-4 shadow-xl">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                  <h3 className="font-bold text-sm text-red-200">{selectedThreat.categoryNameUk}</h3>
                 </div>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {/* SELECTED THREAT CARD */}
-        {selectedThreat && (
-          <div className="mb-4 bg-red-950/90 border border-red-500 rounded-2xl p-4 shadow-xl">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
-                <h3 className="font-bold text-sm text-red-200">{selectedThreat.categoryNameUk}</h3>
-              </div>
-              <button
-                onClick={() => setSelectedThreat(null)}
-                className="text-red-300 hover:text-white text-xs px-2 py-0.5 rounded bg-red-900 border border-red-700"
-              >
-                ×
-              </button>
-            </div>
-            <div className="mt-2 text-xs space-y-1 text-red-100">
-              <p><strong>Локація:</strong> {selectedThreat.detectedLocation}</p>
-              <p><strong>Дистанція:</strong> {selectedThreat.honestDistanceText}</p>
-              <p><strong>Джерело:</strong> {selectedThreat.sourceTitle}</p>
-              <p className="bg-red-900/60 p-2 rounded text-[11px] font-mono mt-1 border border-red-700/60">
-                "{selectedThreat.rawText}"
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* COLLAPSIBLE ADVANCED SETTINGS & SOURCES */}
-        <div className="mb-6 bg-[#0a0f18] border border-[#162032] rounded-2xl p-4">
-          <button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="w-full flex items-center justify-between text-xs font-bold text-slate-300 hover:text-white"
-          >
-            <div className="flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-blue-400" />
-              <span>РОЗШИРЕНІ НАЛАШТУВАННЯ ТА ДЖЕРЕЛА (159 КАНАЛІВ)</span>
-            </div>
-            {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-
-          {showAdvanced && (
-            <div className="mt-4 pt-4 border-t border-slate-800 space-y-4 text-xs">
-              {/* LIVE DIAGNOSTICS & TELEMETRY */}
-              <div className="p-3 bg-[#0d1422] rounded-xl border border-blue-900/60 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-blue-300 font-bold flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Діагностика парсингу та Ingestion</span>
-                  </span>
-                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
-                    LIVE
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-mono">📡 ОСТАННЄ TG ПОВІДОМЛЕННЯ</span>
-                    <span className="font-mono font-bold text-white">
-                      {evaluation?.lastTelegramMessageIso
-                        ? new Date(evaluation.lastTelegramMessageIso).toLocaleTimeString('uk-UA')
-                        : 'Очікування даних'}
-                    </span>
-                  </div>
-                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-mono">🔴 ПРЯМІ ЗАГРОЗИ В СЕКТОРІ</span>
-                    <span className="font-mono font-bold text-red-400">
-                      {evaluation?.threatsCount ?? 0}
-                    </span>
-                  </div>
-                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-mono">👁️ СПОСТЕРЕЖЕННЯ В РЕГІОНІ</span>
-                    <span className="font-mono font-bold text-amber-300">
-                      {(evaluation?.observationsCount ?? 0) + (evaluation?.outsideZoneObservationsCount ?? 0)}
-                    </span>
-                  </div>
-                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-mono">🚫 ВІДХИЛЕНО ПОВІДОМЛЕНЬ</span>
-                    <span className="font-mono font-bold text-slate-300">
-                      {evaluation?.rejectedCount ?? 0}
-                    </span>
-                  </div>
-                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-mono">❓ НЕРОЗПІЗНАНА ГЕОГРАФІЯ</span>
-                    <span className="font-mono font-bold text-amber-400">
-                      {evaluation?.geoUnresolvedCount ?? 0}
-                    </span>
-                  </div>
-                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                    <span className="text-[9px] text-slate-400 block font-mono">📡 АКТИВНІ КАНАЛИ</span>
-                    <span className="font-mono font-bold text-emerald-400">
-                      {sourcesHealth?.telegramOkCount ?? 0} / {sourcesHealth?.telegramSourcesTotal ?? allSources.length}
-                    </span>
-                  </div>
-                </div>
-
                 <button
-                  onClick={() => setShowRejectedModal(true)}
-                  className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  onClick={() => setSelectedThreat(null)}
+                  className="text-red-300 hover:text-white text-xs px-2 py-0.5 rounded bg-red-900 border border-red-700"
                 >
-                  <Search className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Переглянути відхилені повідомлення ({evaluation?.rejectedMessagesLog?.length ?? 0})</span>
+                  ×
                 </button>
               </div>
-
-              {/* AUDIO & VOICE DIAGNOSTICS */}
-              <div className="p-3 bg-[#101726] rounded-xl border border-blue-900/60 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-blue-300 font-bold block flex items-center gap-1.5">
-                    <Megaphone className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Голосове сповіщення (Режим Ajax)</span>
-                  </span>
-                  <button
-                    onClick={() => handleToggleAudio()}
-                    className={'px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ' + (
-                      audioEnabled
-                        ? 'bg-blue-600 text-white border-blue-400'
-                        : 'bg-slate-800 text-slate-400 border-slate-700'
-                    )}
-                  >
-                    {audioEnabled ? 'УВІМКНЕНО' : 'ВИМКНЕНО'}
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  {audioEnabled
-                    ? 'При загрозі пролунає чітке голосове сповіщення диктора українською мовою без штучних сигналів сирен.'
-                    : 'Тихий режим. Голосові сповіщення вимкнено.'}
+              <div className="mt-2 text-xs space-y-1 text-red-100">
+                <p><strong>Локація:</strong> {selectedThreat.detectedLocation}</p>
+                <p><strong>Дистанція:</strong> {selectedThreat.honestDistanceText}</p>
+                <p><strong>Джерело:</strong> {selectedThreat.sourceTitle}</p>
+                <p className="bg-red-900/60 p-2 rounded text-[11px] font-mono mt-1 border border-red-700/60">
+                  "{selectedThreat.rawText}"
                 </p>
-                <div className="pt-1">
-                  <button
-                    onClick={handleManualVoiceTest}
-                    className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs shadow-md"
-                  >
-                    Прослухати голос диктора 🔊
-                  </button>
-                </div>
-              </div>
-
-              {/* RADIUS SENSITIVITY */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-slate-400 font-semibold">Радіус тривоги:</span>
-                  <span className="font-mono font-bold text-blue-300">{radiusKm.toFixed(0)} км</span>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5 mb-2">
-                  {[
-                    { r: 5, label: '🎯 5 км' },
-                    { r: 15, label: '🔴 15 км' },
-                    { r: 30, label: '🟠 30 км' },
-                    { r: 45, label: '🟡 45 км' }
-                  ].map((p) => (
-                    <button
-                      key={p.r}
-                      onClick={() => handleRadiusChange(p.r)}
-                      className={'py-1.5 rounded-lg text-[10px] font-bold border transition-all ' + (radiusKm === p.r ? 'bg-blue-600 text-white border-blue-400' : 'bg-[#111726] text-slate-300 border-slate-800')}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="range"
-                  min="3"
-                  max="45"
-                  value={radiusKm}
-                  onChange={(e) => handleRadiusChange(parseFloat(e.target.value))}
-                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                />
-              </div>
-
-              {/* CITY PRESET SELECTOR (10 CITIES) */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-slate-400 font-semibold">Резервний вибір міста:</span>
-                  <button
-                    onClick={() => setShowLocationModal(true)}
-                    className="text-[10px] text-cyan-400 font-bold underline"
-                  >
-                    Більше міст (800+)
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
-                  {CITY_PRESETS.map((city) => (
-                    <button
-                      key={city.name}
-                      onClick={() => handleSelectManualLocation(city.lat, city.lng, city.name, city.oblast)}
-                      className={'p-2 rounded-xl text-left text-[11px] border truncate ' + (trustedLocation?.name === city.name ? 'bg-blue-900/50 border-blue-400 text-blue-200 font-bold' : 'bg-[#111726] border-slate-800 text-slate-300 hover:bg-slate-800')}
-                    >
-                      <p className="font-semibold text-white truncate">{city.name.split(' (')[0]}</p>
-                      <p className="text-[9px] text-slate-400 truncate">{city.name.split(' (')[1]?.replace(')', '') || city.oblast}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* CUSTOM CHANNELS ADDER */}
-              <div>
-                <span className="text-slate-400 font-semibold block mb-2">Додати свій Telegram-канал:</span>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-2 text-slate-500 text-xs font-mono">@</span>
-                    <input
-                      type="text"
-                      value={newChannelInput}
-                      onChange={(e) => setNewChannelInput(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddCustomChannel()}
-                      placeholder="username (напр. tlknews)"
-                      className="w-full bg-[#070a10] border border-slate-700 rounded-xl pl-7 pr-3 py-1.5 text-xs text-white placeholder-slate-500 font-mono"
-                    />
-                  </div>
-                  <button
-                    onClick={() => handleAddCustomChannel()}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl"
-                  >
-                    +
-                  </button>
-                </div>
-
-                {channelAddMessage && (
-                  <p className="mt-1 text-[10px] text-emerald-400">{channelAddMessage}</p>
-                )}
-
-                {customChannels.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {customChannels.map((c) => (
-                      <span
-                        key={c.username}
-                        className="inline-flex items-center gap-1 bg-blue-950/80 text-blue-300 text-[10px] font-mono px-2 py-0.5 rounded border border-blue-800"
-                      >
-                        <span>@{c.username}</span>
-                        <button onClick={() => handleRemoveCustomChannel(c.username)} className="text-red-400 font-bold">×</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* SOURCES CATALOG */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-slate-400 font-semibold">Каталог джерел ({allSources.length}):</span>
-                  <button
-                    onClick={() => setShowFlugerModal(true)}
-                    className="text-[10px] text-cyan-400 underline font-semibold"
-                  >
-                    Про «Флюгер»
-                  </button>
-                </div>
-                <div className="max-h-48 overflow-y-auto space-y-1 text-[11px] pr-1">
-                  {allSources.slice(0, 35).map((s) => {
-                    const st = sourceStatuses[s.username];
-                    const isOk = st ? st.ok : true;
-                    return (
-                      <div key={s.username} className="flex items-center justify-between p-2 rounded bg-[#070a10] border border-slate-800">
-                        <div className="min-w-0 pr-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className={'w-2 h-2 rounded-full shrink-0 ' + (isOk ? 'bg-emerald-400' : 'bg-red-500')} />
-                            <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
-                          </div>
-                          <p className="text-[10px] text-slate-500 truncate">{s.title}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <span className={'text-[9px] font-mono ' + (isOk ? 'text-emerald-400' : 'text-red-400')}>
-                            {isOk ? 'АКТИВНИЙ' : 'ПОМИЛКА'}
-                          </span>
-                          {st?.lastMessageTimeIso && (
-                            <span className="text-[9px] font-mono text-slate-500 block">
-                              {new Date(st.lastMessageTimeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             </div>
           )}
+
+          {/* HISTORY THREATS (STALE / CLEARED) */}
+          {historyThreats.length > 0 && (
+            <details className="mb-4 bg-[#0a0e17] rounded-2xl border border-slate-800 p-3 text-xs">
+              <summary className="font-mono text-slate-400 uppercase tracking-wider cursor-pointer flex items-center justify-between select-none">
+                <span>📜 Історія цілей (застарілі / відбій) ({historyThreats.length})</span>
+                <span className="text-[10px] text-slate-500">розгорнути</span>
+              </summary>
+              <div className="mt-2.5 space-y-2">
+                {historyThreats.map((threat) => (
+                  <div key={threat.id} className="p-2.5 rounded-xl bg-black/30 border border-slate-800/80 flex items-center justify-between text-slate-300">
+                    <div className="min-w-0 pr-2">
+                      <span className="font-bold text-xs block truncate text-slate-200">{threat.categoryNameUk}</span>
+                      <span className="text-[10px] text-slate-400 block truncate">📍 {threat.detectedLocation} ({threat.statusBadgeUk})</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-500 shrink-0">{threat.ageMinutes} хв тому</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+
+        {/* ========================================================================= */}
+        {/* TAB 4: ⚙️ НАЛАШТУВАННЯ (HOW DOES IT WORK?) */}
+        {/* ========================================================================= */}
+        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+          <div className="mb-3 px-1">
+            <h2 className="text-sm font-black text-white flex items-center gap-1.5">
+              <Sliders className="w-4 h-4 text-blue-400" />
+              <span>Налаштування та керування системою</span>
+            </h2>
+            <p className="text-[11px] text-slate-400">Параметри геолокації, радіус, джерела та діагностика</p>
+          </div>
+
+          {/* SECTION 1: LOCATION MANAGEMENT */}
+          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
+            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-blue-400" />
+              <span>Керування геолокацією</span>
+            </span>
+
+            {/* LOCATION CONFIDENCE CONTROLS BAR (Auto / Lock / Manual) */}
+            <div className="p-1 bg-[#070a10] rounded-xl border border-slate-800">
+              <div className="grid grid-cols-3 gap-1 text-[11px] font-bold">
+                <button
+                  onClick={handleSwitchToAutoGps}
+                  className={'py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ' + (
+                    trustedLocation?.lockMode === 'AUTO' && !isLocationUnreliable
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  )}
+                  title="Автоматичний GPS"
+                >
+                  <Radio className="w-3.5 h-3.5 text-blue-300" />
+                  <span>📍 АВТО</span>
+                </button>
+
+                <button
+                  onClick={handleLockLocation}
+                  className={'py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all ' + (
+                    isLocationLocked
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  )}
+                  title="Зафіксувати поточну точку"
+                >
+                  <Lock className="w-3.5 h-3.5 text-indigo-300" />
+                  <span>📌 ЗАФІКСУВАТИ</span>
+                </button>
+
+                <button
+                  onClick={() => setShowLocationModal(true)}
+                  className="py-2 px-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center justify-center gap-1.5 transition-all"
+                  title="Обрати зі списку або на карті"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>✏️ ВРУЧНУ</span>
+                </button>
+              </div>
+            </div>
+
+            {/* CITY PRESET SELECTOR (10 CITIES) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] text-slate-400 font-semibold">Резервний вибір міста:</span>
+                <button
+                  onClick={() => setShowLocationModal(true)}
+                  className="text-[10px] text-cyan-400 font-bold underline"
+                >
+                  Більше міст (800+)
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
+                {CITY_PRESETS.slice(0, 8).map((city) => (
+                  <button
+                    key={city.name}
+                    onClick={() => handleSelectManualLocation(city.lat, city.lng, city.name, city.oblast)}
+                    className={'p-2 rounded-xl text-left text-[11px] border truncate ' + (
+                      trustedLocation?.name === city.name
+                        ? 'bg-blue-900/50 border-blue-400 text-blue-200 font-bold'
+                        : 'bg-[#070a10] border-slate-800 text-slate-300 hover:bg-slate-800'
+                    )}
+                  >
+                    <p className="font-semibold text-white truncate">{city.name.split(' (')[0]}</p>
+                    <p className="text-[9px] text-slate-400 truncate">{city.name.split(' (')[1]?.replace(')', '') || city.oblast}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 2: RADIUS SENSITIVITY */}
+          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <RadarIcon className="w-3.5 h-3.5 text-blue-400" />
+                <span>Радіус сповіщення (Зона захисту)</span>
+              </span>
+              <span className="font-mono font-bold text-blue-300 text-xs">{radiusKm.toFixed(0)} км</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {[
+                { r: 5, label: '🎯 5 км' },
+                { r: 15, label: '🔴 15 км' },
+                { r: 30, label: '🟠 30 км' },
+                { r: 45, label: '🟡 45 км' }
+              ].map((p) => (
+                <button
+                  key={p.r}
+                  onClick={() => handleRadiusChange(p.r)}
+                  className={'py-1.5 rounded-lg text-[10px] font-bold border transition-all ' + (
+                    radiusKm === p.r
+                      ? 'bg-blue-600 text-white border-blue-400 shadow-sm'
+                      : 'bg-[#070a10] text-slate-300 border-slate-800 hover:bg-slate-800'
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <input
+              type="range"
+              min="3"
+              max="45"
+              value={radiusKm}
+              onChange={(e) => handleRadiusChange(parseFloat(e.target.value))}
+              className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+            />
+          </div>
+
+          {/* SECTION 3: AUDIO & VOICE SETTINGS */}
+          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Volume2 className="w-3.5 h-3.5 text-blue-400" />
+                <span>Голосовий режим (Ajax диктор)</span>
+              </span>
+              <button
+                onClick={() => handleToggleAudio()}
+                className={'px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ' + (
+                  audioEnabled
+                    ? 'bg-blue-600 text-white border-blue-400'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                )}
+              >
+                {audioEnabled ? 'УВІМКНЕНО' : 'ВИМКНЕНО'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              {audioEnabled
+                ? 'При прямій загрозі пролунає чітке голосове сповіщення диктора українською мовою.'
+                : 'Тихий режим. Голосові оголошення вимкнено.'}
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleManualVoiceTest}
+                className="flex-1 py-2 px-3 bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 border border-blue-800 rounded-xl font-bold text-[11px]"
+              >
+                Прослухати голос 🔊
+              </button>
+              <button
+                onClick={startEmergencyPushTest}
+                className="flex-1 py-2 px-3 bg-amber-950/80 hover:bg-amber-900/80 text-amber-300 border border-amber-800 rounded-xl font-bold text-[11px]"
+              >
+                Тест на замкненому екрані
+              </button>
+            </div>
+          </div>
+
+          {/* SECTION 4: OFFICIAL ALERTS LAYER & DIAGNOSTICS */}
+          <div className="mb-4 p-3.5 bg-[#120808] border border-rose-900/80 rounded-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-rose-200 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                <span>Шар офіційних повітряних тривог</span>
+              </span>
+              <span className={'text-[9px] font-mono px-2 py-0.5 rounded border font-bold ' + (
+                alertsDiagnostic.sourceOnline
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
+                  : 'bg-red-950 text-red-300 border-red-800'
+              )}>
+                {alertsDiagnostic.sourceOnline ? 'ONLINE' : 'OFFLINE'}
+              </span>
+            </div>
+
+            {/* LIVE PIPELINE METRICS TABLE */}
+            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">ДЖЕРЕЛО ALERTS.IN.UA:</span>
+                <span className="font-mono font-bold text-emerald-400 flex items-center gap-1 mt-0.5">
+                  <span className={'w-1.5 h-1.5 rounded-full ' + (alertsDiagnostic.sourceOnline ? 'bg-emerald-400' : 'bg-red-500')} />
+                  <span>{alertsDiagnostic.sourceOnline ? 'ONLINE (CORS OK)' : 'OFFLINE'}</span>
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">АКТИВНИХ ОБЛАСТЕЙ:</span>
+                <span className="font-mono font-bold text-rose-300 mt-0.5 block">
+                  {activeOfficialAlertsCount} областей
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">ВАША ОБЛАСТЬ:</span>
+                <span className="font-bold text-white truncate block mt-0.5">
+                  {trustedLocation?.oblast || 'Визначається...'}
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">ТРИВОГА В ОБЛАСТІ:</span>
+                <span className={'font-mono font-bold mt-0.5 block ' + (isUnderOfficialAlert ? 'text-rose-400' : 'text-emerald-400')}>
+                  {isUnderOfficialAlert ? '🔴 АКТИВНА' : '🟢 ВІДСУТНЯ'}
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">POLYGON MATCHED:</span>
+                <span className="font-mono font-bold text-emerald-400 mt-0.5 block">
+                  {activeOfficialAlertsCount > 0 ? 'YES (ТАК)' : 'WAITING'}
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">POLYGON RENDERED:</span>
+                <span className="font-mono font-bold text-emerald-400 mt-0.5 block">
+                  {activeOfficialAlertsCount > 0 ? 'YES (НА КАРТІ)' : 'WAITING'}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-rose-950/80">
+              * Офіційна сирена тривоги є фоновим інформаційним шаром і не переводить ваш локальний сектор у RED без виявлення тактичної рухомої цілі.
+            </p>
+          </div>
+
+          {/* SECTION 5: INGESTION DIAGNOSTICS & TELEMETRY */}
+          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Діагностика Telegram-ingestion</span>
+              </span>
+              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
+                LIVE
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block font-mono">ОСТАННЄ ПОВІДОМЛЕННЯ</span>
+                <span className="font-mono font-bold text-white">
+                  {evaluation?.lastTelegramMessageIso
+                    ? new Date(evaluation.lastTelegramMessageIso).toLocaleTimeString('uk-UA')
+                    : 'Очікування'}
+                </span>
+              </div>
+              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block font-mono">ПРЯМІ ЗАГРОЗИ</span>
+                <span className="font-mono font-bold text-red-400">
+                  {evaluation?.threatsCount ?? 0}
+                </span>
+              </div>
+              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block font-mono">СПОСТЕРЕЖЕННЯ</span>
+                <span className="font-mono font-bold text-amber-300">
+                  {(evaluation?.observationsCount ?? 0) + (evaluation?.outsideZoneObservationsCount ?? 0)}
+                </span>
+              </div>
+              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block font-mono">ВІДХИЛЕНО ПОВІДОМЛЕНЬ</span>
+                <span className="font-mono font-bold text-slate-300">
+                  {evaluation?.rejectedCount ?? 0}
+                </span>
+              </div>
+              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block font-mono">НЕРОЗПІЗНАНА ГЕОГРАФІЯ</span>
+                <span className="font-mono font-bold text-amber-400">
+                  {evaluation?.geoUnresolvedCount ?? 0}
+                </span>
+              </div>
+              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400 block font-mono">АКТИВНІ КАНАЛИ</span>
+                <span className="font-mono font-bold text-emerald-400">
+                  {sourcesHealth?.telegramOkCount ?? 0} / {sourcesHealth?.telegramSourcesTotal ?? allSources.length}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowRejectedModal(true)}
+              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 transition-all shadow-sm"
+            >
+              <Search className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Переглянути відхилені повідомлення ({evaluation?.rejectedMessagesLog?.length ?? 0})</span>
+            </button>
+          </div>
+
+          {/* SECTION 6: SOURCES & CUSTOM CHANNELS */}
+          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Radio className="w-3.5 h-3.5 text-blue-400" />
+                <span>Каталог джерел ({allSources.length})</span>
+              </span>
+              <button
+                onClick={() => setShowFlugerModal(true)}
+                className="text-[10px] text-cyan-400 underline font-semibold"
+              >
+                Про «Флюгер»
+              </button>
+            </div>
+
+            {/* CUSTOM CHANNELS ADDER */}
+            <div>
+              <span className="text-slate-400 text-[11px] font-semibold block mb-1.5">Додати власний канал:</span>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-2 text-slate-500 text-xs font-mono">@</span>
+                  <input
+                    type="text"
+                    value={newChannelInput}
+                    onChange={(e) => setNewChannelInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddCustomChannel()}
+                    placeholder="username (напр. tlknews)"
+                    className="w-full bg-[#070a10] border border-slate-700 rounded-xl pl-7 pr-3 py-1.5 text-xs text-white placeholder-slate-500 font-mono"
+                  />
+                </div>
+                <button
+                  onClick={() => handleAddCustomChannel()}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl"
+                >
+                  +
+                </button>
+              </div>
+
+              {channelAddMessage && (
+                <p className="mt-1 text-[10px] text-emerald-400">{channelAddMessage}</p>
+              )}
+
+              {customChannels.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {customChannels.map((c) => (
+                    <span
+                      key={c.username}
+                      className="inline-flex items-center gap-1 bg-blue-950/80 text-blue-300 text-[10px] font-mono px-2 py-0.5 rounded border border-blue-800"
+                    >
+                      <span>@{c.username}</span>
+                      <button onClick={() => handleRemoveCustomChannel(c.username)} className="text-red-400 font-bold">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* CHANNELS LIST */}
+            <div className="max-h-40 overflow-y-auto space-y-1 text-[11px] pr-1">
+              {allSources.slice(0, 25).map((s) => {
+                const st = sourceStatuses[s.username];
+                const isOk = st ? st.ok : true;
+                return (
+                  <div key={s.username} className="flex items-center justify-between p-2 rounded bg-[#070a10] border border-slate-800">
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className={'w-2 h-2 rounded-full shrink-0 ' + (isOk ? 'bg-emerald-400' : 'bg-red-500')} />
+                        <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 truncate">{s.title}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={'text-[9px] font-mono ' + (isOk ? 'text-emerald-400' : 'text-red-400')}>
+                        {isOk ? 'АКТИВНИЙ' : 'ПОМИЛКА'}
+                      </span>
+                      {st?.lastMessageTimeIso && (
+                        <span className="text-[9px] font-mono text-slate-500 block">
+                          {new Date(st.lastMessageTimeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
       </div>
+
+      {/* ========================================================================= */}
+      {/* PERSISTENT BOTTOM NAVIGATION BAR (NATIVE IPHONE PWA STYLE) */}
+      {/* ========================================================================= */}
+      <nav className="fixed bottom-0 inset-x-0 z-50 bg-[#0c101a]/95 backdrop-blur-xl border-t border-[#182234] shadow-2xl pb-[calc(env(safe-area-inset-bottom,0px)+8px)] pt-2">
+        <div className="max-w-md mx-auto grid grid-cols-4 gap-1 px-2">
+          {/* TAB 1: 🛡 ГОЛОВНА */}
+          <button
+            onClick={() => setActiveTab('home')}
+            className={'flex flex-col items-center justify-center py-1.5 rounded-2xl transition-all active:scale-95 ' + (
+              activeTab === 'home'
+                ? 'text-blue-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <Shield className={'w-5 h-5 ' + (activeTab === 'home' ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'text-slate-400')} />
+            <span className="text-[10px] mt-1 tracking-tight">Головна</span>
+          </button>
+
+          {/* TAB 2: 🗺 МАПА */}
+          <button
+            onClick={() => setActiveTab('map')}
+            className={'flex flex-col items-center justify-center py-1.5 rounded-2xl transition-all active:scale-95 ' + (
+              activeTab === 'map'
+                ? 'text-blue-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <Map className={'w-5 h-5 ' + (activeTab === 'map' ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'text-slate-400')} />
+            <span className="text-[10px] mt-1 tracking-tight">Мапа</span>
+          </button>
+
+          {/* TAB 3: ◉ ПОДІЇ */}
+          <button
+            onClick={() => setActiveTab('events')}
+            className={'relative flex flex-col items-center justify-center py-1.5 rounded-2xl transition-all active:scale-95 ' + (
+              activeTab === 'events'
+                ? 'text-blue-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <div className="relative">
+              <RadarIcon className={'w-5 h-5 ' + (activeTab === 'events' ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'text-slate-400')} />
+              {activeEventsCount > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 bg-red-500 text-white font-black text-[9px] rounded-full min-w-[17px] h-[17px] flex items-center justify-center px-1 shadow-md animate-pulse">
+                  {activeEventsCount}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] mt-1 tracking-tight">Події</span>
+          </button>
+
+          {/* TAB 4: ⚙️ НАЛАШТУВАННЯ */}
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={'flex flex-col items-center justify-center py-1.5 rounded-2xl transition-all active:scale-95 ' + (
+              activeTab === 'settings'
+                ? 'text-blue-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <Sliders className={'w-5 h-5 ' + (activeTab === 'settings' ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'text-slate-400')} />
+            <span className="text-[10px] mt-1 tracking-tight">Налаштування</span>
+          </button>
+        </div>
+      </nav>
 
       {/* LOCATION SELECTION & SEARCH MODAL */}
       {showLocationModal && (
