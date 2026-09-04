@@ -197,11 +197,11 @@ export class LocationValidator {
   /**
    * Set location manually (e.g. from gazetteer city search or map pin click).
    */
-  public setManualLocation(lat: number, lng: number, customName?: string, customOblast?: string): TrustedLocation {
+  public setManualLocation(lat: number, lng: number, customName?: string, customOblast?: string, timestamp?: number): TrustedLocation {
     const nearest = findNearestLocation(lat, lng);
     const resolvedName = customName || nearest.location.name;
     const resolvedOblast = customOblast || nearest.location.oblast;
-    const now = Date.now();
+    const now = timestamp || Date.now();
 
     this.lockMode = 'MANUAL';
     this.isWarmupComplete = true;
@@ -547,6 +547,123 @@ export class LocationValidator {
       isUpdated: true,
       isAnomalous: false,
       confidenceState,
+    };
+  }
+
+  /**
+   * On-Demand GPS validation for "ДЕ Я ЗАРАЗ" user action.
+   * 
+   * Strict safety requirements:
+   * 1. Check coordinates within Ukraine territory.
+   * 2. Reject impossible accuracy (> 800m).
+   * 3. Kinematic evaluation against current trusted location (if exists):
+   *    - Reject speed > EXTREME_SPEED_LIMIT_KMH (260 km/h) over non-trivial distance (> 1 km).
+   *    - Reject instantaneous teleport jump (> 10 km in < 45s).
+   * 
+   * Outcome:
+   * - IF VALID: Updates currentTrusted with VERIFIED state, lockMode 'AUTO', returns { isValid: true, trustedLocation, isUpdated: true }.
+   * - IF UNRELIABLE / ANOMALOUS: Preserves currentTrusted without modifications, returns { isValid: false, trustedLocation: this.currentTrusted, isUpdated: false, reasonUk }.
+   */
+  public processOnDemandGps(measurement: RawGpsMeasurement): {
+    isValid: boolean;
+    trustedLocation: TrustedLocation;
+    isUpdated: boolean;
+    reasonUk?: string;
+  } {
+    const now = measurement.timestamp || Date.now();
+
+    // 1. Territory Bounds Check
+    const isInsideUkraine =
+      measurement.lat >= UKRAINE_BOUNDS.minLat &&
+      measurement.lat <= UKRAINE_BOUNDS.maxLat &&
+      measurement.lng >= UKRAINE_BOUNDS.minLng &&
+      measurement.lng <= UKRAINE_BOUNDS.maxLng &&
+      !(Math.abs(measurement.lat) < 0.1 && Math.abs(measurement.lng) < 0.1);
+
+    if (!isInsideUkraine) {
+      const reason = `Координати (${measurement.lat.toFixed(2)}, ${measurement.lng.toFixed(2)}) за межами України (аномалія GPS)`;
+      return {
+        isValid: false,
+        trustedLocation: this.currentTrusted || this.setManualLocation(50.4501, 30.5234, 'Київ (Центр)', 'Київська область'),
+        isUpdated: false,
+        reasonUk: reason,
+      };
+    }
+
+    // 2. Nominal Accuracy Sanity Check
+    if (measurement.accuracy > 800) {
+      const reason = `Занадто низька точність GPS (±${Math.round(measurement.accuracy)} м)`;
+      return {
+        isValid: false,
+        trustedLocation: this.currentTrusted || this.setManualLocation(50.4501, 30.5234, 'Київ (Центр)', 'Київська область'),
+        isUpdated: false,
+        reasonUk: reason,
+      };
+    }
+
+    // 3. Kinematic consistency check if current trusted location exists
+    if (this.currentTrusted) {
+      const distKm = calculateDistanceKm(
+        this.currentTrusted.lat,
+        this.currentTrusted.lng,
+        measurement.lat,
+        measurement.lng
+      );
+      const timeDeltaSec = Math.max(1, (now - this.currentTrusted.lastVerifiedTimestamp) / 1000);
+      const speedKmh = distKm / (timeDeltaSec / 3600);
+
+      const isImpossibleSpeed = speedKmh > EXTREME_SPEED_LIMIT_KMH && distKm > 1.0;
+      const isSuddenFarJump = distKm > 10.0 && timeDeltaSec < 45;
+      const isExcessiveInaccuracy = measurement.accuracy > 500 && distKm > 2.5;
+
+      if (isImpossibleSpeed || isSuddenFarJump || isExcessiveInaccuracy) {
+        const reason = `Аномальний стрибок: ${distKm.toFixed(1)} км за ${Math.round(timeDeltaSec)}с (${Math.round(speedKmh)} км/год)`;
+        // DO NOT change currentTrusted!
+        return {
+          isValid: false,
+          trustedLocation: this.currentTrusted,
+          isUpdated: false,
+          reasonUk: reason,
+        };
+      }
+    }
+
+    // 4. Reliable Position Accepted
+    const nearest = findNearestLocation(measurement.lat, measurement.lng);
+    let score = 95;
+    if (measurement.accuracy > 40) score -= 10;
+    if (measurement.accuracy > 100) score -= 20;
+
+    const newTrusted: TrustedLocation = {
+      lat: measurement.lat,
+      lng: measurement.lng,
+      accuracyMeters: measurement.accuracy,
+      name: nearest.location.name,
+      oblast: nearest.location.oblast,
+      confidenceState: 'VERIFIED',
+      lockMode: 'AUTO',
+      systemConfidenceScore: score,
+      lastVerifiedTimestamp: now,
+      firstAcquiredTimestamp: this.currentTrusted ? this.currentTrusted.firstAcquiredTimestamp : now,
+      sampleCount: (this.currentTrusted ? this.currentTrusted.sampleCount : 0) + 1,
+      statusMessageUk: `📍 ${nearest.location.name}`,
+      subStatusUk: `GPS ±${Math.round(measurement.accuracy)} м`,
+      anomalyReasonUk: undefined,
+      isManualOrLocked: false,
+      rawGpsSample: measurement,
+    };
+
+    this.currentTrusted = newTrusted;
+    this.lockMode = 'AUTO';
+    this.isWarmupComplete = true;
+    this.consecutiveAnomalies = 0;
+    this.consecutiveValidSamples = 1;
+    this.lastAnomalyTimestamp = 0;
+
+    return {
+      isValid: true,
+      trustedLocation: newTrusted,
+      isUpdated: true,
     };
   }
 

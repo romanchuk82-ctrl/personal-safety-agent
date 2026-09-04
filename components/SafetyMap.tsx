@@ -54,6 +54,7 @@ interface SafetyMapProps {
   isOrange: boolean;
   isFullScreen?: boolean;
   activeTab?: string;
+  centerTrigger?: number;
 }
 
 // Helper to compute zoom level based on monitoring radius
@@ -113,7 +114,8 @@ export default function SafetyMap({
   isRed,
   isOrange,
   isFullScreen = false,
-  activeTab
+  activeTab,
+  centerTrigger
 }: SafetyMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -139,6 +141,32 @@ export default function SafetyMap({
     }, 120);
     return () => clearTimeout(timer);
   }, [isFullScreen, activeTab]);
+
+  // Automatic centering and zoom adaptation when centerTrigger fires
+  useEffect(() => {
+    if (!isMapReady || !mapInstanceRef.current || !userLocation) return;
+    const map = mapInstanceRef.current;
+    userInteractedRef.current = false;
+
+    const timer = setTimeout(() => {
+      try {
+        map.invalidateSize();
+        if (radiusCircleRef.current) {
+          const bounds = radiusCircleRef.current.getBounds();
+          map.fitBounds(bounds.pad(0.12), { animate: true, maxZoom: 14 });
+        } else {
+          map.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
+            animate: true,
+            duration: 0.5
+          });
+        }
+      } catch (e) {
+        console.warn('Map centerTrigger error:', e);
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [centerTrigger, isMapReady, userLocation?.lat, userLocation?.lng, radiusKm]);
 
   // Map Click Handler for manual point picking
   useEffect(() => {
@@ -512,10 +540,16 @@ export default function SafetyMap({
   const handleRecenter = useCallback(() => {
     if (!mapInstanceRef.current || !userLocation) return;
     userInteractedRef.current = false;
-    mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
-      animate: true,
-      duration: 0.6
-    });
+    mapInstanceRef.current.invalidateSize();
+    if (radiusCircleRef.current) {
+      const bounds = radiusCircleRef.current.getBounds();
+      mapInstanceRef.current.fitBounds(bounds.pad(0.12), { animate: true, maxZoom: 14 });
+    } else {
+      mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
+        animate: true,
+        duration: 0.6
+      });
+    }
   }, [userLocation, radiusKm]);
 
   const handleZoomIn = useCallback(() => {

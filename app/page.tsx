@@ -49,7 +49,8 @@ import {
   Search,
   Map,
   Edit3,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic } from '@/lib/sources/alertsInUa';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics } from '@/lib/sources/telegramScraper';
@@ -140,6 +141,8 @@ export default function HomePage() {
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
   const [citySearchQuery, setCitySearchQuery] = useState<string>('');
   const [locationSuccessNotice, setLocationSuccessNotice] = useState<string>('');
+  const [isLocatingWhereAmI, setIsLocatingWhereAmI] = useState<boolean>(false);
+  const [mapCenterTrigger, setMapCenterTrigger] = useState<number>(0);
 
   // Test Push Modal State
   const [showTestModal, setShowTestModal] = useState<boolean>(false);
@@ -578,6 +581,67 @@ export default function HomePage() {
     }
   };
 
+  // ON-DEMAND GPS: "📍 ДЕ Я ЗАРАЗ" (Direct GPS Validation & Map Centering)
+  const handleWhereAmINow = () => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      setLocationSuccessNotice('Не вдалося підтвердити нову позицію. Використовується остання надійна локація.');
+      setTimeout(() => setLocationSuccessNotice(''), 4500);
+      setActiveTab('map');
+      setMapCenterTrigger(Date.now());
+      return;
+    }
+
+    setIsLocatingWhereAmI(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setIsLocatingWhereAmI(false);
+        const sample: RawGpsMeasurement = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: Math.round(position.coords.accuracy),
+          timestamp: position.timestamp || Date.now(),
+          altitude: position.coords.altitude,
+          speed: position.coords.speed,
+          heading: position.coords.heading,
+        };
+
+        const result = locationValidatorRef.current.processOnDemandGps(sample);
+
+        if (result.isValid && result.isUpdated) {
+          setTrustedLocation(result.trustedLocation);
+          saveTrustedLocationToStorage(result.trustedLocation);
+          setLocationSuccessNotice(`📍 Позицію оновлено: ${result.trustedLocation.name}`);
+          setTimeout(() => setLocationSuccessNotice(''), 3500);
+
+          if (isActive) {
+            performSecurityCheck(result.trustedLocation);
+          }
+          startContinuousGpsWatch();
+        } else {
+          // Unreliable or anomalous position detected
+          console.warn('GPS position rejected by Location Confidence validator:', result.reasonUk);
+          setLocationSuccessNotice('Не вдалося підтвердити нову позицію. Використовується остання надійна локація.');
+          setTimeout(() => setLocationSuccessNotice(''), 4500);
+        }
+
+        // Always switch to Map tab and center on the trusted location
+        setActiveTab('map');
+        setMapCenterTrigger(Date.now());
+      },
+      (geoError) => {
+        setIsLocatingWhereAmI(false);
+        console.warn('WhereAmI GPS fetch error:', geoError);
+        setLocationSuccessNotice('Не вдалося підтвердити нову позицію. Використовується остання надійна локація.');
+        setTimeout(() => setLocationSuccessNotice(''), 4500);
+
+        setActiveTab('map');
+        setMapCenterTrigger(Date.now());
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  };
+
   // EMERGENCY PUSH TEST (Ajax Style)
   const startEmergencyPushTest = async () => {
     if (audioEnabled) {
@@ -744,17 +808,26 @@ export default function HomePage() {
       {/* MAIN CONTAINER WITH BOTTOM PADDING FOR SAFE-AREA AND NAV BAR */}
       <div className="max-w-md mx-auto px-4 pt-3 pb-24">
 
+        {/* GLOBAL LOCATION / SYSTEM NOTICE BANNER */}
+        {locationSuccessNotice && (
+          <div className={`mb-3 p-2.5 rounded-xl text-xs font-bold text-center border animate-fadeIn flex items-center justify-center gap-2 shadow-lg backdrop-blur-md ${
+            locationSuccessNotice.includes('Не вдалося') || locationSuccessNotice.includes('нестабільн')
+              ? 'bg-amber-950/95 text-amber-200 border-amber-600/80 shadow-amber-950/30'
+              : 'bg-indigo-950/95 text-indigo-200 border-indigo-700 shadow-indigo-950/30'
+          }`}>
+            {locationSuccessNotice.includes('Не вдалося') || locationSuccessNotice.includes('нестабільн') ? (
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            ) : (
+              <Check className="w-4 h-4 text-indigo-300 shrink-0" />
+            )}
+            <span>{locationSuccessNotice}</span>
+          </div>
+        )}
+
         {/* ========================================================================= */}
         {/* TAB 1: 🛡 ГОЛОВНА (WHAT'S HAPPENING WITH ME RIGHT NOW?) */}
         {/* ========================================================================= */}
         <div className={activeTab === 'home' ? 'block' : 'hidden'}>
-          {/* LOCATION SUCCESS / NOTICE MESSAGE */}
-          {locationSuccessNotice && (
-            <div className="mb-3 p-2 rounded-xl bg-indigo-950 text-indigo-200 text-xs font-bold text-center border border-indigo-700 animate-fadeIn flex items-center justify-center gap-1.5 shadow-md">
-              <Check className="w-3.5 h-3.5 text-indigo-300" />
-              <span>{locationSuccessNotice}</span>
-            </div>
-          )}
 
           {voiceStatusMessage && (
             <div className="mb-3 p-2 rounded-xl bg-blue-950 text-blue-200 text-xs font-bold text-center border border-blue-700 animate-pulse">
@@ -973,32 +1046,25 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* QUICK SHORTCUT CARDS TO OTHER TABS */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <button
-              onClick={() => setActiveTab('map')}
-              className="p-3 rounded-2xl bg-[#0e1422] hover:bg-[#151f32] border border-slate-800 flex items-center justify-between text-left group transition-all"
-            >
-              <div>
-                <span className="text-[10px] text-slate-400 font-mono block">ПОВНИЙ ЕКРАН</span>
-                <span className="font-bold text-white group-hover:text-blue-300">🗺 Мапа сектора</span>
-              </div>
-              <span className="text-cyan-400 text-xs">→</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('events')}
-              className="p-3 rounded-2xl bg-[#0e1422] hover:bg-[#151f32] border border-slate-800 flex items-center justify-between text-left group transition-all"
-            >
-              <div>
-                <span className="text-[10px] text-slate-400 font-mono block">ЖУРНАЛ СИСТЕМИ</span>
-                <span className="font-bold text-white group-hover:text-amber-300">
-                  ◉ Події {activeEventsCount > 0 ? `(${activeEventsCount})` : ''}
-                </span>
-              </div>
-              <span className="text-amber-400 text-xs">→</span>
-            </button>
-          </div>
+          {/* ON-DEMAND GPS: "📍 ДЕ Я ЗАРАЗ" */}
+          <button
+            onClick={handleWhereAmINow}
+            disabled={isLocatingWhereAmI}
+            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-950/90 via-[#0d1c38] to-cyan-950/90 hover:from-blue-900/90 hover:to-cyan-900/90 border border-blue-600/60 shadow-lg flex items-center justify-center gap-2.5 text-white font-black text-sm tracking-wide transition-all active:scale-[0.98] disabled:opacity-75 group"
+            title="Оновити поточну GPS-локацію та показати на карті"
+          >
+            {isLocatingWhereAmI ? (
+              <>
+                <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                <span className="text-cyan-200">ОТРИМАННЯ GPS КООРДИНАТ...</span>
+              </>
+            ) : (
+              <>
+                <Navigation className="w-4 h-4 text-cyan-400 group-hover:rotate-45 transition-transform" />
+                <span className="drop-shadow-sm">📍 ДЕ Я ЗАРАЗ</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* ========================================================================= */}
@@ -1021,6 +1087,7 @@ export default function HomePage() {
                 isOrange={isOrange}
                 isFullScreen={true}
                 activeTab={activeTab}
+                centerTrigger={mapCenterTrigger}
               />
             </div>
           ) : (

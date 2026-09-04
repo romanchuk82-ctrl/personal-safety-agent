@@ -310,4 +310,81 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     assert.strictEqual(restored.anomalyReasonUk, undefined);
   });
 
+  await t.test('Сценарій L: On-Demand GPS «ДЕ Я ЗАРАЗ» — успішне оновлення надійної позиції', () => {
+    const validator = new LocationValidator(null, 'AUTO');
+    const baseTime = 1700000000000;
+
+    // Встановлюємо початкову позицію в Києві
+    validator.setManualLocation(KYIV_CENTER.lat, KYIV_CENTER.lng, KYIV_CENTER.name, 'Київська область', baseTime);
+    assert.strictEqual(validator.getTrustedLocation()?.name.includes('Київ'), true);
+
+    // Користувач натискає «ДЕ Я ЗАРАЗ», приходить надійна GPS-позиція в Борисполі через 30 хвилин
+    const onDemandRes = validator.processOnDemandGps({
+      lat: BORYSPIL.lat,
+      lng: BORYSPIL.lng,
+      accuracy: 15,
+      timestamp: baseTime + 1800000
+    });
+
+    assert.strictEqual(onDemandRes.isValid, true, 'Надійна вибірка має бути прийнята');
+    assert.strictEqual(onDemandRes.isUpdated, true, 'Trusted location має оновитися');
+    assert.strictEqual(onDemandRes.trustedLocation.name.includes('Бориспіль'), true);
+    assert.strictEqual(onDemandRes.trustedLocation.confidenceState, 'VERIFIED');
+    assert.strictEqual(onDemandRes.trustedLocation.lockMode, 'AUTO');
+  });
+
+  await t.test('Сценарій M: On-Demand GPS «ДЕ Я ЗАРАЗ» — захист від аномального стрибка / РЕБ', () => {
+    const validator = new LocationValidator(null, 'AUTO');
+    const baseTime = 1700000000000;
+
+    // Встановлюємо надійну позицію в Києві
+    validator.setManualLocation(KYIV_CENTER.lat, KYIV_CENTER.lng, KYIV_CENTER.name, 'Київська область', baseTime);
+    const initialTrusted = validator.getTrustedLocation()!;
+
+    // 1. Спроба оновити GPS з аномальним стрибком 450 км за 10 секунд
+    const spoofRes = validator.processOnDemandGps({
+      lat: RANDOM_SPOOF.lat,
+      lng: RANDOM_SPOOF.lng,
+      accuracy: 10,
+      timestamp: baseTime + 10000
+    });
+
+    assert.strictEqual(spoofRes.isValid, false, 'Аномальний стрибок повинен бути відхилений');
+    assert.strictEqual(spoofRes.isUpdated, false, 'Trusted location НЕ повинна змінюватися');
+    assert.strictEqual(validator.getTrustedLocation()?.name, initialTrusted.name, 'Моніторинг залишається в Києві');
+    assert.strictEqual(spoofRes.reasonUk?.includes('Аномальний стрибок'), true);
+
+    // 2. Спроба оновити GPS координатами за межами України (Чорне море)
+    const outOfBoundsRes = validator.processOnDemandGps({
+      lat: BLACK_SEA.lat,
+      lng: BLACK_SEA.lng,
+      accuracy: 10,
+      timestamp: baseTime + 20000
+    });
+
+    assert.strictEqual(outOfBoundsRes.isValid, false, 'Координати за межами України повинні бути відхилені');
+    assert.strictEqual(outOfBoundsRes.isUpdated, false, 'Trusted location НЕ повинна змінюватися');
+    assert.strictEqual(validator.getTrustedLocation()?.name, initialTrusted.name, 'Моніторинг залишається в Києві');
+  });
+
+  await t.test('Сценарій N: On-Demand GPS «ДЕ Я ЗАРАЗ» — відхилення занадто низької точності (> 800м)', () => {
+    const validator = new LocationValidator(null, 'AUTO');
+    const baseTime = 1700000000000;
+
+    validator.setManualLocation(KYIV_CENTER.lat, KYIV_CENTER.lng, KYIV_CENTER.name, 'Київська область', baseTime);
+    const initialTrusted = validator.getTrustedLocation()!;
+
+    const inaccurateRes = validator.processOnDemandGps({
+      lat: KYIV_CENTER.lat + 0.01,
+      lng: KYIV_CENTER.lng + 0.01,
+      accuracy: 1500, // 1.5 км похибка
+      timestamp: baseTime + 5000
+    });
+
+    assert.strictEqual(inaccurateRes.isValid, false, 'Точність 1500м має бути відхилена');
+    assert.strictEqual(inaccurateRes.isUpdated, false);
+    assert.strictEqual(validator.getTrustedLocation()?.name, initialTrusted.name);
+    assert.strictEqual(inaccurateRes.reasonUk?.includes('Занадто низька точність'), true);
+  });
+
 });
