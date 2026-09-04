@@ -18,52 +18,56 @@ interface CacheEntry {
 }
 
 let alertsCache: CacheEntry | null = null;
-const CACHE_TTL_MS = 15000; // 15 seconds cache
+const CACHE_TTL_MS = 15000;
 
 export async function fetchActiveAlerts(token?: string): Promise<{ alerts: RawAlert[]; status: 'OK' | 'CACHE' | 'ERROR'; message?: string }> {
   const apiToken = token || process.env.ALERTS_API_TOKEN || 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
   const now = Date.now();
 
-  // Return cached alerts if fresh
   if (alertsCache && (now - alertsCache.timestamp) < CACHE_TTL_MS) {
     return { alerts: alertsCache.data, status: 'CACHE' };
   }
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
+  // Try direct API first, then CORS proxies
+  const candidateUrls = [
+    `https://api.alerts.in.ua/v1/alerts/active.json?token=${apiToken}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.alerts.in.ua/v1/alerts/active.json?token=${apiToken}`)}`
+  ];
 
-    const res = await fetch('https://api.alerts.in.ua/v1/alerts/active.json', {
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'User-Agent': 'PersonalSafetyAgent/1.0',
-        'Accept': 'application/json'
-      },
-      signal: controller.signal
-    });
+  for (const url of candidateUrls) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
 
-    clearTimeout(timeout);
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Accept': 'application/json'
+        },
+        signal: controller.signal
+      });
 
-    if (!res.ok) {
-      if (alertsCache) {
-        return { alerts: alertsCache.data, status: 'CACHE', message: `API responded ${res.status}, using cache` };
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        const alerts: RawAlert[] = data.alerts || [];
+
+        alertsCache = {
+          data: alerts,
+          timestamp: now
+        };
+
+        return { alerts, status: 'OK' };
       }
-      return { alerts: [], status: 'ERROR', message: `API error ${res.status}: ${res.statusText}` };
+    } catch (err: any) {
+      // Continue to next proxy
     }
-
-    const data = await res.json();
-    const alerts: RawAlert[] = data.alerts || [];
-
-    alertsCache = {
-      data: alerts,
-      timestamp: now
-    };
-
-    return { alerts, status: 'OK' };
-  } catch (err: any) {
-    if (alertsCache) {
-      return { alerts: alertsCache.data, status: 'CACHE', message: `Network error: ${err.message}, fallback to cache` };
-    }
-    return { alerts: [], status: 'ERROR', message: err.message || 'Unknown network error' };
   }
+
+  if (alertsCache) {
+    return { alerts: alertsCache.data, status: 'CACHE', message: 'Fallback to cache' };
+  }
+
+  return { alerts: [], status: 'ERROR', message: 'Could not fetch active alerts' };
 }

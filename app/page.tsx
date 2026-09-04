@@ -22,6 +22,10 @@ import {
   Activity,
   Layers
 } from 'lucide-react';
+import { fetchActiveAlerts } from '@/lib/sources/alertsInUa';
+import { fetchAllTelegramFeeds } from '@/lib/sources/telegramScraper';
+import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent } from '@/lib/matcher';
+import { findNearestLocation } from '@/lib/gazetteer';
 
 interface LocationState {
   lat: number;
@@ -30,36 +34,6 @@ interface LocationState {
   name: string;
   oblast: string;
   fixedAt: string;
-}
-
-interface ThreatEvent {
-  id: string;
-  source: string;
-  sourceTitle: string;
-  category: string;
-  categoryNameUk: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
-  detectedLocation: string;
-  detectedOblast: string;
-  distanceKm: number | null;
-  isWithinRadius: boolean;
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-  confidenceReason: string;
-  requiresImmediateShelter: boolean;
-  rawText: string;
-  timestamp: string;
-  voiceAlertText: string;
-}
-
-interface EvaluationResult {
-  hasLocalThreat: boolean;
-  primaryThreat: ThreatEvent | null;
-  threatEvents: ThreatEvent[];
-  allClearDetected: boolean;
-  userNearestKnownLocation: string;
-  userOblast: string;
-  totalSourcesEvaluated: number;
-  evaluationTimestamp: string;
 }
 
 const CITY_PRESETS = [
@@ -81,7 +55,7 @@ export default function HomePage() {
   const [secondsSinceCheck, setSecondsSinceCheck] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isChecking, setIsChecking] = useState<boolean>(false);
-  const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [showPresets, setShowPresets] = useState<boolean>(false);
@@ -128,8 +102,6 @@ export default function HomePage() {
         })
         .catch((err) => console.log('SW reg error:', err));
     }
-
-    fetchSourcesHealth();
   }, []);
 
   useEffect(() => {
@@ -236,15 +208,7 @@ export default function HomePage() {
 
       setPushSubscribed(true);
       setPushStatusMessage('Web Push сповіщення на замкнений екран активовано');
-
-      const subData = {
-        endpoint: sub.endpoint,
-        keys: {
-          p256dh: sub.toJSON().keys?.p256dh || '',
-          auth: sub.toJSON().keys?.auth || '',
-        },
-      };
-      return subData;
+      return sub;
     } catch (err: any) {
       setPushStatusMessage('Для сповіщень на iPhone додайте сайт на екран «Початковий» (Add to Home Screen)');
       return null;
@@ -257,26 +221,34 @@ export default function HomePage() {
 
     setIsChecking(true);
     try {
-      const url = `/api/check?lat=${loc.lat}&lng=${loc.lng}&radius=${radiusKm}&sessionId=${sessionId}&userName=Кирил`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const [alertsResult, telegramResult] = await Promise.all([
+        fetchActiveAlerts(),
+        fetchAllTelegramFeeds()
+      ]);
 
-      if (data.success && data.evaluation) {
-        setEvaluation(data.evaluation);
-        setLastCheckTime(new Date());
+      const evalResult = evaluateLocalSecurity(
+        loc.lat,
+        loc.lng,
+        radiusKm,
+        'Кирил',
+        alertsResult.alerts,
+        telegramResult.messages
+      );
 
-        const threat = data.evaluation.primaryThreat;
-        if (threat && threat.requiresImmediateShelter) {
-          if (lastSpokenAlertIdRef.current !== threat.id) {
-            lastSpokenAlertIdRef.current = threat.id;
-            speakAlert(threat.voiceAlertText);
-          }
-        } else if (data.evaluation.allClearDetected) {
-          const clearEvt = data.evaluation.threatEvents.find((e: ThreatEvent) => e.category === 'ALL_CLEAR');
-          if (clearEvt && lastSpokenAlertIdRef.current !== clearEvt.id) {
-            lastSpokenAlertIdRef.current = clearEvt.id;
-            speakAlert(clearEvt.voiceAlertText);
-          }
+      setEvaluation(evalResult);
+      setLastCheckTime(new Date());
+
+      const threat = evalResult.primaryThreat;
+      if (threat && threat.requiresImmediateShelter) {
+        if (lastSpokenAlertIdRef.current !== threat.id) {
+          lastSpokenAlertIdRef.current = threat.id;
+          speakAlert(threat.voiceAlertText);
+        }
+      } else if (evalResult.allClearDetected) {
+        const clearEvt = evalResult.threatEvents.find((e) => e.category === 'ALL_CLEAR');
+        if (clearEvt && lastSpokenAlertIdRef.current !== clearEvt.id) {
+          lastSpokenAlertIdRef.current = clearEvt.id;
+          speakAlert(clearEvt.voiceAlertText);
         }
       }
     } catch (err) {
@@ -284,17 +256,7 @@ export default function HomePage() {
     } finally {
       setIsChecking(false);
     }
-  }, [location, radiusKm, sessionId, speakAlert]);
-
-  const fetchSourcesHealth = async () => {
-    try {
-      const res = await fetch('/api/sources-health');
-      const data = await res.json();
-      setSourcesHealth(data);
-    } catch (e) {
-      console.error('Health check error:', e);
-    }
-  };
+  }, [location, radiusKm, speakAlert]);
 
   const handleActivate = async () => {
     setIsLoading(true);
@@ -312,12 +274,14 @@ export default function HomePage() {
             });
           });
 
+          const nearest = findNearestLocation(pos.coords.latitude, pos.coords.longitude);
+
           locData = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             accuracy: Math.round(pos.coords.accuracy),
-            name: 'Поточні GPS координати',
-            oblast: 'Україна',
+            name: nearest.location.name,
+            oblast: nearest.location.oblast,
             fixedAt: new Date().toLocaleTimeString('uk-UA'),
           };
         } catch (geoErr) {
@@ -344,28 +308,7 @@ export default function HomePage() {
       setLocation(locData);
       localStorage.setItem('psa_location', JSON.stringify(locData));
 
-      const pushSub = await setupPushSubscription();
-
-      const regRes = await fetch('/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: sessionId,
-          lat: locData.lat,
-          lng: locData.lng,
-          accuracyMeters: locData.accuracy,
-          radiusKm,
-          userName: 'Кирил',
-          pushSubscription: pushSub,
-        }),
-      });
-      const regData = await regRes.json();
-      if (regData.session) {
-        locData.name = regData.session.locationName;
-        locData.oblast = regData.session.oblastName;
-        setLocation(locData);
-        localStorage.setItem('psa_location', JSON.stringify(locData));
-      }
+      await setupPushSubscription();
 
       speakAlert(`Моніторинг безпеки активовано для локації ${locData.name}. Ваша позиція зафіксована.`);
 
@@ -386,9 +329,6 @@ export default function HomePage() {
     if (checkIntervalRef.current) {
       clearInterval(checkIntervalRef.current);
     }
-    if (sessionId) {
-      fetch(`/api/session?id=${sessionId}`, { method: 'DELETE' }).catch(() => {});
-    }
     speakAlert('Моніторинг безпеки зупинено.');
   };
 
@@ -406,39 +346,12 @@ export default function HomePage() {
     setShowPresets(false);
 
     if (isActive) {
-      fetch('/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: sessionId,
-          lat: newLoc.lat,
-          lng: newLoc.lng,
-          accuracyMeters: newLoc.accuracy,
-          radiusKm,
-          userName: 'Кирил',
-        }),
-      }).then(() => performCheck(newLoc));
+      performCheck(newLoc);
     }
   };
 
-  const handleTestAlert = async () => {
-    try {
-      const res = await fetch('/api/test-alert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          userName: 'Кирил',
-          locationName: location ? location.name : 'Запоріжжя',
-        }),
-      });
-      const data = await res.json();
-      if (data.voiceText) {
-        speakAlert(data.voiceText);
-      }
-    } catch (e) {
-      speakAlert("Кирил, увага. Це тестове сповіщення системи Personal Safety Agent. Зв'язок активний.");
-    }
+  const handleTestAlert = () => {
+    speakAlert("Кирил, увага. Це тестове сповіщення системи Personal Safety Agent. Зв'язок активний.");
   };
 
   useEffect(() => {
@@ -868,7 +781,7 @@ export default function HomePage() {
       </div>
 
       <footer className="mt-8 text-center text-[11px] text-slate-500 border-t border-[#1e2638] pt-4">
-        Personal Safety Agent • Локальна безпека в Україні • Автономний хмарний моніторинг
+        Personal Safety Agent • Локальна безпека в Україні • Автономний моніторинг
       </footer>
     </main>
   );
