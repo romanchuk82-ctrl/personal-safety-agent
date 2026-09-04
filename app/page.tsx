@@ -1307,7 +1307,7 @@ export default function HomePage() {
 
       {/* LOCATION SELECTION & SEARCH MODAL */}
       {showLocationModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
           <div className="bg-[#0f1522] border border-cyan-500/50 rounded-3xl max-w-md w-full p-5 text-slate-200 text-xs space-y-3.5 shadow-2xl animate-fadeIn max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2">
@@ -1376,7 +1376,7 @@ export default function HomePage() {
 
       {/* EMERGENCY PUSH TEST COUNTDOWN MODAL */}
       {showTestModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
           <div className="bg-[#0f1522] border border-amber-500/60 rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl space-y-4">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
               <Bell className="w-7 h-7 animate-bounce" />
@@ -1422,7 +1422,7 @@ export default function HomePage() {
 
       {/* FLÜGER INFO MODAL */}
       {showFlugerModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 modal-safe">
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 modal-safe">
           <div className="bg-[#0f1522] border border-cyan-500/40 rounded-3xl max-w-sm w-full p-5 text-slate-200 text-xs space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <h3 className="font-bold text-sm text-white">Методологія «ФЛЮГЕР» (КБ Технарі)</h3>
@@ -1445,7 +1445,7 @@ export default function HomePage() {
 
       {/* REJECTED MESSAGES AUDIT MODAL */}
       {showRejectedModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
           <div className="bg-[#0f1522] border border-slate-700 rounded-3xl max-w-lg w-full p-5 text-slate-200 text-xs space-y-3.5 shadow-2xl animate-fadeIn max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2">
