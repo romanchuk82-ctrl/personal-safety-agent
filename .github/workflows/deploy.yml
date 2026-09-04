@@ -51,6 +51,7 @@ jobs:
       - name: Build with Next.js
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
         env:
+          NEXT_PUBLIC_BASE_PATH: "/personal-safety-agent"
           ALERTS_API_TOKEN: "f2184a0fd1d14c5aa291368854cbe654d178883fab2203"
           NEXT_PUBLIC_VAPID_PUBLIC_KEY: "BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII"
 

@@ -90,8 +90,9 @@ export default function HomePage() {
     }
 
     if ('serviceWorker' in navigator) {
+      const swUrl = './sw.js';
       navigator.serviceWorker
-        .register('/sw.js')
+        .register(swUrl)
         .then((reg) => {
           console.log('ServiceWorker registered:', reg.scope);
           navigator.serviceWorker.addEventListener('message', (event) => {
