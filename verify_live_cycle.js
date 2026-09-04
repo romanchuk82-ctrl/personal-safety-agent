@@ -25,8 +25,17 @@ async function verifyLiveCycle() {
   const consoleErrors = [];
   page.on('console', msg => {
     if (msg.type() === 'error') {
-      consoleErrors.push(msg.text());
-      console.error(' [Page Error]:', msg.text());
+      const loc = msg.location()?.url || '';
+      consoleErrors.push(msg.text() + (loc ? ` (${loc})` : ''));
+      console.error(' [Page Error]:', msg.text(), loc);
+    }
+  });
+  page.on('requestfailed', req => {
+    console.log(' [Request Failed]:', req.url(), req.failure()?.errorText);
+  });
+  page.on('response', res => {
+    if (res.status() >= 400) {
+      console.log(` [Response ${res.status()}]:`, res.url());
     }
   });
 
