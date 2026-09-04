@@ -1133,6 +1133,142 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
     "region": "Вся Україна",
     "weight": 0.95,
     "priority": 2
+  },
+  {
+    "username": "AerisRimor",
+    "title": "Aeris Rimor (Радар БПЛА & Ракетної небезпеки)",
+    "category": "radar_national",
+    "region": "Вся Україна",
+    "weight": 0.96,
+    "priority": 1
+  },
+  {
+    "username": "chyste_nebo",
+    "title": "Чисте Небо (Моніторинг балістики, крилатих ракет & КАБ)",
+    "category": "radar_national",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 1
+  },
+  {
+    "username": "vseok450",
+    "title": "Все Ок 4.5.0 (Вектори руху Шахедів)",
+    "category": "radar_national",
+    "region": "Вся Україна",
+    "weight": 0.94,
+    "priority": 1
+  },
+  {
+    "username": "mon1tor_ua",
+    "title": "Monitor UA (Оперативний трекінг цілей)",
+    "category": "radar_national",
+    "region": "Вся Україна",
+    "weight": 0.93,
+    "priority": 1
+  },
+  {
+    "username": "kyivmonitoring1",
+    "title": "Київ Моніторинг / Радар (Київщина, Бориспіль)",
+    "category": "tactical_north",
+    "region": "Київська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "monitoring_kiev",
+    "title": "Моніторинг Київ (ППО та загрози)",
+    "category": "tactical_north",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 2
+  },
+  {
+    "username": "Tsaplienko",
+    "title": "Андрій Цаплієнко (Оперативні воєнні сповіщення)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "ssternenko",
+    "title": "Сергій Стерненко (Оперативна аналітика та загрози БПЛА)",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.93,
+    "priority": 1
+  },
+  {
+    "username": "dsns_telegram",
+    "title": "ДСНС України (Офіційні надзвичайні ситуації та укриття)",
+    "category": "military_official",
+    "region": "Вся Україна",
+    "weight": 0.95,
+    "priority": 2
+  },
+  {
+    "username": "operinform",
+    "title": "Оперативні зведення / Ситуація",
+    "category": "osint_network",
+    "region": "Вся Україна",
+    "weight": 0.89,
+    "priority": 2
+  },
+  {
+    "username": "kievinfo_kyiv",
+    "title": "Київ Інфо (Київ та Бориспіль)",
+    "category": "tactical_north",
+    "region": "Київська область",
+    "weight": 0.9,
+    "priority": 2
+  },
+  {
+    "username": "dnepr_operativ",
+    "title": "Дніпро Оперативний (Дніпро & Павлоград)",
+    "category": "tactical_east",
+    "region": "Дніпропетровська область",
+    "weight": 0.91,
+    "priority": 1
+  },
+  {
+    "username": "kharkiv_1654",
+    "title": "Харьков 1654 (КАБи та балістика С-300)",
+    "category": "tactical_east",
+    "region": "Харківська область",
+    "weight": 0.91,
+    "priority": 1
+  },
+  {
+    "username": "novostiniko",
+    "title": "Новости N (Миколаїв оперативний)",
+    "category": "tactical_south",
+    "region": "Миколаївська область",
+    "weight": 0.9,
+    "priority": 1
+  },
+  {
+    "username": "sumy_radar",
+    "title": "Суми Радар (КАБи та дрони вздовж кордону)",
+    "category": "tactical_north",
+    "region": "Сумська область",
+    "weight": 0.92,
+    "priority": 1
+  },
+  {
+    "username": "poltava_radar",
+    "title": "Полтава Радар (БПЛА & Ракетний транзит)",
+    "category": "tactical_center",
+    "region": "Полтавська область",
+    "weight": 0.91,
+    "priority": 1
+  },
+  {
+    "username": "zaporozhye_radar",
+    "title": "Запоріжжя Радар (КАБи та РСЗВ з ТОТ)",
+    "category": "tactical_south",
+    "region": "Запорізька область",
+    "weight": 0.92,
+    "priority": 1
   }
 ];
 
