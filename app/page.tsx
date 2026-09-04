@@ -12,6 +12,7 @@ const SafetyMap = dynamic(() => import('@/components/SafetyMap'), {
     </div>
   ),
 });
+
 import {
   Shield,
   ShieldAlert,
@@ -42,22 +43,28 @@ import {
   XCircle,
   HelpCircle,
   Megaphone,
-  Volume1
+  Volume1,
+  Lock,
+  Unlock,
+  Search,
+  Map,
+  Edit3,
+  AlertCircle
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert } from '@/lib/sources/alertsInUa';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState } from '@/lib/matcher';
-import { findNearestLocation } from '@/lib/gazetteer';
+import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
 import { unlockAudioAndSpeech, speakUkrainian, stopAllAudio } from '@/lib/soundService';
-
-interface LocationState {
-  lat: number;
-  lng: number;
-  accuracy: number;
-  name: string;
-  oblast: string;
-  fixedAt: string;
-}
+import {
+  LocationValidator,
+  TrustedLocation,
+  LocationLockMode,
+  LocationConfidenceState,
+  RawGpsMeasurement,
+  saveTrustedLocationToStorage,
+  loadTrustedLocationFromStorage
+} from '@/lib/locationValidator';
 
 const CITY_PRESETS = [
   // Київ та Столичний регіон
@@ -87,11 +94,13 @@ const CITY_PRESETS = [
 
 export default function HomePage() {
   const [isActive, setIsActive] = useState<boolean>(false);
-  const [location, setLocation] = useState<LocationState | null>(null);
+  const [trustedLocation, setTrustedLocation] = useState<TrustedLocation | null>(null);
   const [radiusKm, setRadiusKm] = useState<number>(15.0);
   const [lastCheckTime, setLastCheckTime] = useState<Date | null>(null);
   const [secondsSinceCheck, setSecondsSinceCheck] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isWarmingUp, setIsWarmingUp] = useState<boolean>(false);
+  const [warmupSampleCount, setWarmupSampleCount] = useState<number>(0);
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [officialAlerts, setOfficialAlerts] = useState<RawAlert[]>([]);
@@ -99,6 +108,11 @@ export default function HomePage() {
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
   
+  // Location Manager & Search Modals
+  const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
+  const [citySearchQuery, setCitySearchQuery] = useState<string>('');
+  const [locationSuccessNotice, setLocationSuccessNotice] = useState<string>('');
+
   // Test Push Modal State
   const [showTestModal, setShowTestModal] = useState<boolean>(false);
   const [testCountdown, setTestCountdown] = useState<number | null>(null);
@@ -112,6 +126,8 @@ export default function HomePage() {
   const [channelAddMessage, setChannelAddMessage] = useState<string>('');
   const [selectedThreat, setSelectedThreat] = useState<ThreatEvent | null>(null);
 
+  const locationValidatorRef = useRef<LocationValidator>(new LocationValidator(null, 'AUTO'));
+  const watchPositionIdRef = useRef<number | null>(null);
   const lastSpokenAlertIdRef = useRef<string | null>(null);
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -131,6 +147,7 @@ export default function HomePage() {
     };
   }, []);
 
+  // Initialize Storage State
   useEffect(() => {
     const storedAudio = localStorage.getItem('psa_audio_enabled');
     if (storedAudio !== null) {
@@ -152,16 +169,36 @@ export default function HomePage() {
       }
     } catch (e) {}
 
+    // Load saved trusted location & lock mode
+    const savedLocation = loadTrustedLocationFromStorage();
+    if (savedLocation) {
+      locationValidatorRef.current = new LocationValidator(savedLocation, savedLocation.lockMode);
+      setTrustedLocation(savedLocation);
+    } else {
+      // Default to Boryspil / Kyiv as default pre-activation placeholder
+      const defaultLoc: TrustedLocation = {
+        lat: 50.3500,
+        lng: 30.9500,
+        accuracyMeters: 10,
+        name: 'Бориспіль (Центр / Аеропорт)',
+        oblast: 'Київська область',
+        confidenceState: 'VERIFIED',
+        lockMode: 'AUTO',
+        systemConfidenceScore: 95,
+        lastVerifiedTimestamp: Date.now(),
+        firstAcquiredTimestamp: Date.now(),
+        sampleCount: 1,
+        statusMessageUk: '📍 Бориспіль (Центр / Аеропорт)',
+        subStatusUk: 'Готовий до активації захисту',
+        isManualOrLocked: false,
+      };
+      locationValidatorRef.current = new LocationValidator(defaultLoc, 'AUTO');
+      setTrustedLocation(defaultLoc);
+    }
+
     const storedActive = localStorage.getItem('psa_is_active') === 'true';
-    const storedLocation = localStorage.getItem('psa_location');
-    if (storedLocation) {
-      try {
-        const parsedLoc = JSON.parse(storedLocation);
-        setLocation(parsedLoc);
-        if (storedActive) {
-          setIsActive(true);
-        }
-      } catch (e) {}
+    if (storedActive) {
+      setIsActive(true);
     }
 
     if ('serviceWorker' in navigator) {
@@ -201,7 +238,7 @@ export default function HomePage() {
       setTimeout(() => setVoiceStatusMessage(''), 3000);
     } else {
       unlockAudioAndSpeech();
-      setVoiceStatusMessage('🔊 Голосові сповіщення УВІМКНЕНО (Режим як в Ajax)');
+      setVoiceStatusMessage('🔊 Голосові сповіщення УВІМКНЕНО (Режим Ajax)');
       setTimeout(() => setVoiceStatusMessage(''), 3000);
     }
   };
@@ -231,7 +268,7 @@ export default function HomePage() {
     );
   };
 
-  const performSecurityCheck = useCallback(async (currentLoc: LocationState) => {
+  const performSecurityCheck = useCallback(async (currentLoc: TrustedLocation) => {
     if (isChecking) return;
     setIsChecking(true);
 
@@ -280,8 +317,48 @@ export default function HomePage() {
     }
   }, [radiusKm, isChecking, speakAlert, customChannels, lastCheckTime, audioEnabled]);
 
+  // Continuous background GPS feed to Location Confidence Layer
+  const startContinuousGpsWatch = useCallback(() => {
+    if (typeof window === 'undefined' || !navigator.geolocation) return;
+    if (watchPositionIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchPositionIdRef.current);
+      watchPositionIdRef.current = null;
+    }
+
+    watchPositionIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const sample: RawGpsMeasurement = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: Math.round(position.coords.accuracy),
+          timestamp: position.timestamp || Date.now(),
+          altitude: position.coords.altitude,
+          speed: position.coords.speed,
+          heading: position.coords.heading,
+        };
+
+        const result = locationValidatorRef.current.processGpsMeasurement(sample);
+        setTrustedLocation(result.trustedLocation);
+        saveTrustedLocationToStorage(result.trustedLocation);
+
+        if (result.isUpdated && isActive) {
+          // Trigger security check for updated position
+          performSecurityCheck(result.trustedLocation);
+        }
+      },
+      (err) => {
+        console.warn('Continuous GPS watch warning:', err);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
+    );
+  }, [isActive, performSecurityCheck]);
+
+  // Handle Activation: Multi-sample warmup with EW validation
   const handleActivate = async () => {
     setIsLoading(true);
+    setIsWarmingUp(true);
+    setWarmupSampleCount(0);
+
     if (audioEnabled) {
       unlockAudioAndSpeech();
     }
@@ -293,54 +370,66 @@ export default function HomePage() {
         } catch (e) {}
       }
 
+      // If location is already LOCKED or MANUAL, activate immediately from that point
+      if (trustedLocation && (trustedLocation.lockMode === 'LOCKED' || trustedLocation.lockMode === 'MANUAL')) {
+        setIsActive(true);
+        localStorage.setItem('psa_is_active', 'true');
+        setIsLoading(false);
+        setIsWarmingUp(false);
+        await performSecurityCheck(trustedLocation);
+
+        if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
+        checkIntervalRef.current = setInterval(() => {
+          performSecurityCheck(trustedLocation);
+        }, 25000);
+        return;
+      }
+
+      // AUTO GPS Warmup: Collect initial GPS samples
       navigator.geolocation.getCurrentPosition(
         async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          const accuracy = Math.round(position.coords.accuracy);
-
-          const nearest = findNearestLocation(lat, lng);
-          const nowStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-          const newLocation: LocationState = {
-            lat,
-            lng,
-            accuracy,
-            name: nearest.location.name,
-            oblast: nearest.location.oblast,
-            fixedAt: nowStr
+          const sample: RawGpsMeasurement = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: Math.round(position.coords.accuracy),
+            timestamp: position.timestamp || Date.now(),
           };
 
-          setLocation(newLocation);
+          const valResult = locationValidatorRef.current.processGpsMeasurement(sample);
+          setTrustedLocation(valResult.trustedLocation);
+          saveTrustedLocationToStorage(valResult.trustedLocation);
           setIsActive(true);
-          localStorage.setItem('psa_location', JSON.stringify(newLocation));
           localStorage.setItem('psa_is_active', 'true');
-
           setIsLoading(false);
-          await performSecurityCheck(newLocation);
+          setIsWarmingUp(false);
+
+          await performSecurityCheck(valResult.trustedLocation);
 
           if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
           checkIntervalRef.current = setInterval(() => {
-            performSecurityCheck(newLocation);
+            if (locationValidatorRef.current.getTrustedLocation()) {
+              performSecurityCheck(locationValidatorRef.current.getTrustedLocation()!);
+            }
           }, 25000);
+
+          // Start continuous GPS watch in background
+          startContinuousGpsWatch();
         },
         (geoError) => {
-          console.warn('Geolocation fallback to Zaporizhzhia:', geoError);
-          const fallbackLoc: LocationState = {
-            lat: 47.8388,
-            lng: 35.1396,
-            accuracy: 50,
-            name: 'Запоріжжя (Центр)',
-            oblast: 'Запорізька область',
-            fixedAt: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          };
+          console.warn('Geolocation fallback to Boryspil / Kyiv:', geoError);
+          const fallbackLoc = locationValidatorRef.current.setManualLocation(
+            50.3500,
+            30.9500,
+            'Бориспіль (Центр / Аеропорт)',
+            'Київська область'
+          );
 
-          setLocation(fallbackLoc);
+          setTrustedLocation(fallbackLoc);
           setIsActive(true);
-          localStorage.setItem('psa_location', JSON.stringify(fallbackLoc));
           localStorage.setItem('psa_is_active', 'true');
-
           setIsLoading(false);
+          setIsWarmingUp(false);
+
           performSecurityCheck(fallbackLoc);
 
           if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
@@ -353,6 +442,7 @@ export default function HomePage() {
     } catch (err) {
       console.error('Activation error:', err);
       setIsLoading(false);
+      setIsWarmingUp(false);
     }
   };
 
@@ -363,9 +453,64 @@ export default function HomePage() {
       clearInterval(checkIntervalRef.current);
       checkIntervalRef.current = null;
     }
+    if (watchPositionIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchPositionIdRef.current);
+      watchPositionIdRef.current = null;
+    }
   };
 
-  // LOCKED SCREEN PUSH + VOICE TEST (Ajax style)
+  // LOCK LOCATION HANDLER (📌 ЗАФІКСУВАТИ ЛОКАЦІЮ)
+  const handleLockLocation = () => {
+    if (!trustedLocation) return;
+    const locked = locationValidatorRef.current.lockCurrentLocation();
+    if (locked) {
+      setTrustedLocation({ ...locked });
+      saveTrustedLocationToStorage(locked);
+      setLocationSuccessNotice(`📌 Локацію зафіксовано: ${locked.name}`);
+      setTimeout(() => setLocationSuccessNotice(''), 3500);
+
+      if (isActive) {
+        performSecurityCheck(locked);
+      }
+    }
+  };
+
+  // UNLOCK / SWITCH TO AUTO GPS (📍 AUTO)
+  const handleSwitchToAutoGps = () => {
+    const autoLoc = locationValidatorRef.current.unlockToAutoMode();
+    if (autoLoc) {
+      setTrustedLocation({ ...autoLoc });
+      saveTrustedLocationToStorage(autoLoc);
+      setLocationSuccessNotice('📍 Увімкнено Авто-GPS з розумним захистом від РЕБ');
+      setTimeout(() => setLocationSuccessNotice(''), 3500);
+
+      startContinuousGpsWatch();
+
+      if (isActive) {
+        performSecurityCheck(autoLoc);
+      }
+    }
+  };
+
+  // MANUAL LOCATION HANDLER (✏️ ВИБРАТИ НА КАРТІ / СПИСОК)
+  const handleSelectManualLocation = (lat: number, lng: number, name?: string, oblast?: string) => {
+    const manualLoc = locationValidatorRef.current.setManualLocation(lat, lng, name, oblast);
+    setTrustedLocation({ ...manualLoc });
+    saveTrustedLocationToStorage(manualLoc);
+    setShowLocationModal(false);
+    setLocationSuccessNotice(`📌 Локацію встановлено: ${manualLoc.name}`);
+    setTimeout(() => setLocationSuccessNotice(''), 3500);
+
+    if (isActive) {
+      performSecurityCheck(manualLoc);
+      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
+      checkIntervalRef.current = setInterval(() => {
+        performSecurityCheck(manualLoc);
+      }, 25000);
+    }
+  };
+
+  // EMERGENCY PUSH TEST (Ajax Style)
   const startEmergencyPushTest = async () => {
     if (audioEnabled) {
       unlockAudioAndSpeech();
@@ -406,31 +551,6 @@ export default function HomePage() {
     }, 1000);
   };
 
-  const handleSelectCityPreset = (preset: typeof CITY_PRESETS[0]) => {
-    if (audioEnabled) {
-      unlockAudioAndSpeech();
-    }
-    const newLoc: LocationState = {
-      lat: preset.lat,
-      lng: preset.lng,
-      accuracy: 25,
-      name: preset.name,
-      oblast: preset.oblast,
-      fixedAt: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    };
-
-    setLocation(newLoc);
-    localStorage.setItem('psa_location', JSON.stringify(newLoc));
-
-    if (isActive) {
-      performSecurityCheck(newLoc);
-      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
-      checkIntervalRef.current = setInterval(() => {
-        performSecurityCheck(newLoc);
-      }, 25000);
-    }
-  };
-
   const handleAddCustomChannel = (rawName?: string) => {
     const target = (rawName || newChannelInput).trim().replace(/^@/, '').replace(/^https?:\/\/t\.me\//, '');
     if (!target) return;
@@ -447,7 +567,7 @@ export default function HomePage() {
       username: target,
       title: '@' + target + ' (Користувацький)',
       category: 'user_custom',
-      region: location?.oblast || 'Вся Україна',
+      region: trustedLocation?.oblast || 'Вся Україна',
       weight: 0.96,
       priority: 1
     };
@@ -473,9 +593,21 @@ export default function HomePage() {
   const isDegraded = state === 'DEGRADED' || secondsSinceCheck > 90;
   const isGreen = !isRed && !isOrange && !isDegraded && isActive;
 
+  const isLocationLocked = trustedLocation?.lockMode === 'LOCKED' || trustedLocation?.lockMode === 'MANUAL';
+  const isLocationUnreliable = trustedLocation?.confidenceState === 'UNRELIABLE';
+
   const radarThreats = (evaluation?.threatEvents || []).filter(
     (t) => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && t.distanceKm !== null && t.distanceKm <= 45
   );
+
+  // Gazetteer search filter for location modal
+  const filteredGazetteer = citySearchQuery.trim()
+    ? UKRAINIAN_GAZETTEER.filter((g) =>
+        g.name.toLowerCase().includes(citySearchQuery.toLowerCase()) ||
+        g.oblast.toLowerCase().includes(citySearchQuery.toLowerCase()) ||
+        g.aliases.some((a) => a.toLowerCase().includes(citySearchQuery.toLowerCase()))
+      ).slice(0, 15)
+    : UKRAINIAN_GAZETTEER.slice(0, 10);
 
   return (
     <main className="min-h-screen bg-[#070a10] text-slate-100 main-safe selection:bg-blue-500 selection:text-white font-sans antialiased">
@@ -491,8 +623,9 @@ export default function HomePage() {
                   AJAX-VOICE
                 </span>
               </h1>
-              <p className="text-[11px] text-slate-400 truncate">
-                {location ? location.name : 'Геолокація готова'}
+              <p className="text-[11px] text-slate-400 truncate flex items-center gap-1">
+                {isLocationLocked ? <Lock className="w-2.5 h-2.5 text-indigo-400 inline shrink-0" /> : null}
+                <span>{trustedLocation ? trustedLocation.name : 'Геолокація готова'}</span>
               </p>
             </div>
           </div>
@@ -523,7 +656,58 @@ export default function HomePage() {
       </header>
 
       {/* MAIN CONTAINER */}
-      <div className="max-w-md mx-auto px-4 pt-4">
+      <div className="max-w-md mx-auto px-4 pt-3">
+
+        {/* LOCATION CONFIDENCE CONTROLS BAR (Auto / Lock / Manual) */}
+        <div className="mb-3 p-1.5 bg-[#0e1524] rounded-2xl border border-slate-800 shadow-lg">
+          <div className="grid grid-cols-3 gap-1 text-[11px] font-bold">
+            {/* AUTO GPS BUTTON */}
+            <button
+              onClick={handleSwitchToAutoGps}
+              className={'py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ' + (
+                trustedLocation?.lockMode === 'AUTO' && !isLocationUnreliable
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              )}
+              title="Автоматичний GPS з розумним захистом від спуфінгу РЕБ"
+            >
+              <Radio className="w-3.5 h-3.5 text-blue-300" />
+              <span>📍 АВТО</span>
+            </button>
+
+            {/* LOCK BUTTON */}
+            <button
+              onClick={handleLockLocation}
+              className={'py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ' + (
+                isLocationLocked
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              )}
+              title="Зафіксувати поточну точку: ігнорувати будь-які GPS-стрибки РЕБ"
+            >
+              <Lock className="w-3.5 h-3.5 text-indigo-300" />
+              <span>📌 ЗАФІКСУВАТИ</span>
+            </button>
+
+            {/* MANUAL / MAP PICKER BUTTON */}
+            <button
+              onClick={() => setShowLocationModal(true)}
+              className="py-2 px-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center justify-center gap-1.5 transition-all"
+              title="Обрати місто з пошуку або поставити точку на карті"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+              <span>✏️ ВРУЧНУ</span>
+            </button>
+          </div>
+        </div>
+
+        {/* LOCATION SUCCESS / NOTICE MESSAGE */}
+        {locationSuccessNotice && (
+          <div className="mb-3 p-2 rounded-xl bg-indigo-950 text-indigo-200 text-xs font-bold text-center border border-indigo-700 animate-fadeIn flex items-center justify-center gap-1.5 shadow-md">
+            <Check className="w-3.5 h-3.5 text-indigo-300" />
+            <span>{locationSuccessNotice}</span>
+          </div>
+        )}
 
         {/* VOICE QUICK CONTROLS */}
         <div className="mb-3 flex items-center gap-2">
@@ -550,6 +734,36 @@ export default function HomePage() {
         {voiceStatusMessage && (
           <div className="mb-3 p-2 rounded-xl bg-blue-950 text-blue-200 text-xs font-bold text-center border border-blue-700 animate-pulse">
             {voiceStatusMessage}
+          </div>
+        )}
+
+        {/* EW / GPS SPOOFING WARNING CARD (Appears if suspicious GPS jump detected) */}
+        {isLocationUnreliable && (
+          <div className="mb-4 bg-amber-950/90 border border-amber-500/80 rounded-2xl p-3.5 shadow-xl animate-fadeIn text-xs text-amber-200 space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-bounce" />
+              <div>
+                <h3 className="font-bold text-amber-100 text-xs">⚠️ Геолокація нестабільна (РЕБ)</h3>
+                <p className="text-[11px] text-amber-300/90 mt-0.5 leading-relaxed">
+                  Виявлено різкий стрибок координат. Система автоматично зберегла останню надійну точку:{' '}
+                  <strong>{trustedLocation?.name}</strong>. Моніторинг загроз не переривається!
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1 border-t border-amber-800/60 text-[11px]">
+              <button
+                onClick={handleLockLocation}
+                className="flex-1 py-1.5 px-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-all"
+              >
+                📌 Зафіксувати цю точку
+              </button>
+              <button
+                onClick={() => setShowLocationModal(true)}
+                className="py-1.5 px-2.5 bg-amber-900/80 hover:bg-amber-800 text-amber-200 font-semibold rounded-lg border border-amber-700 transition-all"
+              >
+                Вказати місто
+              </button>
+            </div>
           </div>
         )}
 
@@ -608,12 +822,21 @@ export default function HomePage() {
           </p>
 
           {/* TELEMETRY METRICS */}
-          {isActive && location && (
+          {trustedLocation && (
             <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-2 gap-2 text-xs">
               <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-400 block font-mono">📍 ВАША ЛОКАЦІЯ</span>
-                <span className="font-bold text-white truncate block">{location.name}</span>
-                <span className="text-[10px] text-slate-400 font-mono">GPS ±{location.accuracy}м</span>
+                <span className="text-[10px] text-slate-400 block font-mono flex items-center justify-between">
+                  <span>📍 ВАША ЛОКАЦІЯ</span>
+                  {isLocationLocked ? <span className="text-indigo-400 font-bold">LOCKED 📌</span> : null}
+                </span>
+                <span className="font-bold text-white truncate block">{trustedLocation.name}</span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {isLocationUnreliable
+                    ? '⚠️ РЕБ: остання підтверджена'
+                    : isLocationLocked
+                    ? '📌 Зафіксовано користувачем'
+                    : `GPS ±${Math.round(trustedLocation.accuracyMeters)}м`}
+                </span>
               </div>
               <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
                 <span className="text-[10px] text-slate-400 block font-mono">📡 ЗОНА ЗАХИСТУ</span>
@@ -649,23 +872,45 @@ export default function HomePage() {
               {isLoading ? (
                 <>
                   <RefreshCw className="w-6 h-6 animate-spin" />
-                  <span>ФІКСАЦІЯ GPS ТА ЗАПУСК...</span>
+                  <span>ВАЛІДАЦІЯ СИГНАЛУ GPS ТА ЗАПУСК...</span>
                 </>
               ) : (
                 <>
                   <Radio className="w-6 h-6" />
-                  <span>АКТИВУВАТИ ЗАХИСТ (GPS)</span>
+                  <span>АКТИВУВАТИ ЗАХИСТ</span>
                 </>
               )}
             </button>
           ) : (
-            <button
-              onClick={handleDeactivate}
-              className="w-full py-4 px-6 rounded-2xl bg-[#161e2e] hover:bg-slate-800 text-slate-300 hover:text-white font-bold text-sm tracking-wide border border-slate-700/80 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              <ShieldAlert className="w-4 h-4 text-red-400" />
-              <span>ЗУПИНИТИ МОНІТОРИНГ</span>
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDeactivate}
+                className="flex-1 py-4 px-4 rounded-2xl bg-[#161e2e] hover:bg-slate-800 text-slate-300 hover:text-white font-bold text-sm tracking-wide border border-slate-700/80 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                <ShieldAlert className="w-4 h-4 text-red-400" />
+                <span>ЗУПИНИТИ МОНІТОРИНГ</span>
+              </button>
+
+              {!isLocationLocked ? (
+                <button
+                  onClick={handleLockLocation}
+                  className="py-4 px-4 rounded-2xl bg-indigo-950/80 hover:bg-indigo-900/80 text-indigo-200 font-bold text-xs border border-indigo-700/70 flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                  title="Зафіксувати точку, щоб GPS не зміщував зону"
+                >
+                  <Lock className="w-4 h-4 text-indigo-400" />
+                  <span>ЗАФІКСУВАТИ</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSwitchToAutoGps}
+                  className="py-4 px-4 rounded-2xl bg-blue-950/80 hover:bg-blue-900/80 text-blue-200 font-bold text-xs border border-blue-700/70 flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                  title="Повернутися до авто-GPS"
+                >
+                  <Unlock className="w-4 h-4 text-blue-400" />
+                  <span>АВТО-GPS</span>
+                </button>
+              )}
+            </div>
           )}
 
           {/* REAL PUSH TEST BUTTON */}
@@ -678,16 +923,17 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* INTERACTIVE SAFETY MAP (Replacing Static Radar) */}
-        {isActive && location && (
+        {/* INTERACTIVE SAFETY MAP */}
+        {trustedLocation && (
           <div className="mb-4">
             <SafetyMap
-              userLocation={location}
+              userLocation={trustedLocation}
               radiusKm={radiusKm}
               threats={radarThreats}
               officialAlerts={officialAlerts}
               selectedThreat={selectedThreat}
               onSelectThreat={setSelectedThreat}
+              onSelectMapLocation={(lat, lng) => handleSelectManualLocation(lat, lng)}
               isActive={isActive}
               isRed={isRed}
               isOrange={isOrange}
@@ -803,13 +1049,21 @@ export default function HomePage() {
 
               {/* CITY PRESET SELECTOR (10 CITIES) */}
               <div>
-                <span className="text-slate-400 font-semibold block mb-2">Резервний вибір міста (10 міст):</span>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-slate-400 font-semibold">Резервний вибір міста:</span>
+                  <button
+                    onClick={() => setShowLocationModal(true)}
+                    className="text-[10px] text-cyan-400 font-bold underline"
+                  >
+                    Більше міст (800+)
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
                   {CITY_PRESETS.map((city) => (
                     <button
                       key={city.name}
-                      onClick={() => handleSelectCityPreset(city)}
-                      className={'p-2 rounded-xl text-left text-[11px] border truncate ' + (location?.name === city.name ? 'bg-blue-900/50 border-blue-400 text-blue-200 font-bold' : 'bg-[#111726] border-slate-800 text-slate-300 hover:bg-slate-800')}
+                      onClick={() => handleSelectManualLocation(city.lat, city.lng, city.name, city.oblast)}
+                      className={'p-2 rounded-xl text-left text-[11px] border truncate ' + (trustedLocation?.name === city.name ? 'bg-blue-900/50 border-blue-400 text-blue-200 font-bold' : 'bg-[#111726] border-slate-800 text-slate-300 hover:bg-slate-800')}
                     >
                       <p className="font-semibold text-white truncate">{city.name.split(' (')[0]}</p>
                       <p className="text-[9px] text-slate-400 truncate">{city.name.split(' (')[1]?.replace(')', '') || city.oblast}</p>
@@ -885,6 +1139,75 @@ export default function HomePage() {
         </div>
 
       </div>
+
+      {/* LOCATION SELECTION & SEARCH MODAL */}
+      {showLocationModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
+          <div className="bg-[#0f1522] border border-cyan-500/50 rounded-3xl max-w-md w-full p-5 text-slate-200 text-xs space-y-3.5 shadow-2xl animate-fadeIn max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-bold text-sm text-white">Вибір локації для захисту</h3>
+              </div>
+              <button onClick={() => setShowLocationModal(false)} className="text-slate-400 hover:text-white text-base font-bold">✕</button>
+            </div>
+
+            <p className="text-[11px] text-slate-300 leading-relaxed shrink-0">
+              Оберіть населений пункт зі списку, знайдіть у пошуку або торкніться карти нижче.
+            </p>
+
+            {/* SEARCH INPUT */}
+            <div className="relative shrink-0">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={citySearchQuery}
+                onChange={(e) => setCitySearchQuery(e.target.value)}
+                placeholder="Пошук (напр. Бориспіль, Оболонь, Полтава...)"
+                className="w-full bg-[#070a10] border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 font-sans focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+
+            {/* RESULTS LIST */}
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 min-h-[140px]">
+              <span className="text-[10px] text-slate-400 font-mono block uppercase">Населені пункти та райони ({filteredGazetteer.length}):</span>
+              {filteredGazetteer.map((loc) => (
+                <button
+                  key={loc.name}
+                  onClick={() => handleSelectManualLocation(loc.lat, loc.lng, loc.name, loc.oblast)}
+                  className="w-full p-2.5 rounded-xl bg-[#080d16] hover:bg-slate-800 border border-slate-800 text-left flex items-center justify-between transition-all group"
+                >
+                  <div className="truncate pr-2">
+                    <p className="font-bold text-white group-hover:text-cyan-300 truncate">{loc.name}</p>
+                    <p className="text-[10px] text-slate-400 truncate">{loc.oblast} • {loc.type}</p>
+                  </div>
+                  <span className="text-[10px] font-bold text-cyan-400 shrink-0">Обрати →</span>
+                </button>
+              ))}
+            </div>
+
+            {/* QUICK AUTO GPS OPTION */}
+            <div className="pt-2 border-t border-slate-800 shrink-0 flex gap-2">
+              <button
+                onClick={() => {
+                  handleSwitchToAutoGps();
+                  setShowLocationModal(false);
+                }}
+                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md"
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Увімкнути Авто-GPS</span>
+              </button>
+              <button
+                onClick={() => setShowLocationModal(false)}
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs"
+              >
+                Закрити
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* EMERGENCY PUSH TEST COUNTDOWN MODAL */}
       {showTestModal && (

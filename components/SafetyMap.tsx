@@ -31,14 +31,23 @@ interface SafetyMapProps {
     lat: number;
     lng: number;
     accuracy?: number;
+    accuracyMeters?: number;
     name: string;
     oblast?: string;
+    confidenceState?: 'VERIFIED' | 'UNCERTAIN' | 'UNRELIABLE' | 'LOCKED';
+    lockMode?: 'AUTO' | 'LOCKED' | 'MANUAL';
+    isManualOrLocked?: boolean;
+    statusMessageUk?: string;
+    subStatusUk?: string;
+    anomalyReasonUk?: string;
   } | null;
   radiusKm: number;
   threats: ThreatEvent[];
   officialAlerts?: RawAlert[];
   selectedThreat: ThreatEvent | null;
   onSelectThreat: (threat: ThreatEvent | null) => void;
+  onSelectMapLocation?: (lat: number, lng: number) => void;
+  isMapPickerActive?: boolean;
   isActive: boolean;
   isRed: boolean;
   isOrange: boolean;
@@ -94,6 +103,8 @@ export default function SafetyMap({
   officialAlerts = [],
   selectedThreat,
   onSelectThreat,
+  onSelectMapLocation,
+  isMapPickerActive,
   isActive,
   isRed,
   isOrange
@@ -111,6 +122,23 @@ export default function SafetyMap({
   const [isMapReady, setIsMapReady] = useState(false);
   const [showOfficialAlerts, setShowOfficialAlerts] = useState<boolean>(true);
   const [currentZoom, setCurrentZoom] = useState(11);
+
+  // Map Click Handler for manual point picking
+  useEffect(() => {
+    if (!isMapReady || !mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    const handleMapClick = (e: any) => {
+      if (onSelectMapLocation && e.latlng) {
+        onSelectMapLocation(e.latlng.lat, e.latlng.lng);
+      }
+    };
+
+    map.on('click', handleMapClick);
+    return () => {
+      map.off('click', handleMapClick);
+    };
+  }, [isMapReady, onSelectMapLocation]);
 
   // 1. Initialize Leaflet Map (Using Clean ESRI Dark Gray Canvas without any watermarks)
   useEffect(() => {
@@ -254,12 +282,19 @@ export default function SafetyMap({
     const map = mapInstanceRef.current;
     const userLatLng: [number, number] = [userLocation.lat, userLocation.lng];
 
+    const isLocked = userLocation.confidenceState === 'LOCKED' || userLocation.lockMode === 'LOCKED' || userLocation.lockMode === 'MANUAL';
+    const isUnreliable = userLocation.confidenceState === 'UNRELIABLE';
+
+    const pinBg = isUnreliable ? 'bg-amber-500' : isLocked ? 'bg-indigo-600' : 'bg-blue-500';
+    const pingBg = isUnreliable ? 'bg-amber-500/40' : isLocked ? 'bg-indigo-500/30' : 'bg-blue-500/30';
+    const haloBg = isUnreliable ? 'bg-amber-500/50' : isLocked ? 'bg-indigo-500/50' : 'bg-blue-500/50';
+
     const userHtml = `
-      <div class="relative flex items-center justify-center" style="width: 32px; height: 32px;">
-        <span class="absolute inline-flex h-8 w-8 rounded-full bg-blue-500/30 animate-ping"></span>
-        <span class="absolute inline-flex h-5 w-5 rounded-full bg-blue-500/50"></span>
-        <div class="relative w-3.5 h-3.5 rounded-full bg-blue-500 border-2 border-white shadow-lg z-10 flex items-center justify-center">
-          <div class="w-1 h-1 rounded-full bg-white"></div>
+      <div class="relative flex items-center justify-center cursor-pointer" style="width: 36px; height: 36px;">
+        <span class="absolute inline-flex h-9 w-9 rounded-full ${pingBg} animate-ping"></span>
+        <span class="absolute inline-flex h-6 w-6 rounded-full ${haloBg}"></span>
+        <div class="relative w-4 h-4 rounded-full ${pinBg} border-2 border-white shadow-xl z-10 flex items-center justify-center text-[8px] text-white font-bold">
+          ${isLocked ? '📌' : isUnreliable ? '⚠️' : '<div class="w-1.5 h-1.5 rounded-full bg-white"></div>'}
         </div>
       </div>
     `;
@@ -267,8 +302,8 @@ export default function SafetyMap({
     const userIcon = L.divIcon({
       html: userHtml,
       className: 'user-location-pin',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
 
     if (userMarkerRef.current) {
@@ -451,10 +486,20 @@ export default function SafetyMap({
     <div className="relative w-full rounded-3xl overflow-hidden border border-[#1a2538] bg-[#070b14] shadow-2xl transition-all">
       {/* MAP TOP STATUS BAR */}
       <div className="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between gap-2 pointer-events-none">
-        <div className="pointer-events-auto bg-[#0c1220]/95 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700/70 shadow-lg flex items-center gap-2 max-w-[60%] truncate">
-          <div className={'w-2 h-2 rounded-full ' + (isRed ? 'bg-red-500 animate-ping' : isOrange ? 'bg-amber-400' : isActive ? 'bg-emerald-400' : 'bg-slate-400')} />
+        <div className="pointer-events-auto bg-[#0c1220]/95 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700/70 shadow-lg flex items-center gap-2 max-w-[65%] truncate">
+          <div className={'w-2 h-2 rounded-full ' + (
+            isRed ? 'bg-red-500 animate-ping' :
+            isOrange ? 'bg-amber-400' :
+            userLocation?.confidenceState === 'UNRELIABLE' ? 'bg-amber-400 animate-pulse' :
+            userLocation?.confidenceState === 'LOCKED' ? 'bg-indigo-400' :
+            isActive ? 'bg-emerald-400' : 'bg-slate-400'
+          )} />
           <span className="text-[11px] font-bold text-white truncate">
-            {userLocation ? userLocation.name : 'Визначення позиції...'}
+            {userLocation ? (
+              userLocation.confidenceState === 'LOCKED' ? `📌 ${userLocation.name}` :
+              userLocation.confidenceState === 'UNRELIABLE' ? `⚠️ ${userLocation.name}` :
+              userLocation.name
+            ) : 'Визначення позиції...'}
           </span>
           <span className="text-[10px] font-mono text-blue-400 font-semibold shrink-0">
             {radiusKm} км
