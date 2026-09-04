@@ -1,10 +1,11 @@
 import { calculateDistanceKm, calculateBearingDegrees, getBearingSectorUk, extractGeoFromText, findNearestLocation, GeoLocation, RegionalZone } from './gazetteer';
-import { classifyThreat, ThreatCategory, ThreatClassification } from './threatClassifier';
+import { classifyThreat, getThreatTtlMinutes, ThreatCategory, ThreatClassification } from './threatClassifier';
 import { RawAlert } from './sources/alertsInUa';
 import { TelegramMessage, clusterTelegramMessages, MessageCluster, ClusterSourceEntry } from './sources/telegramScraper';
 
 export type SecurityState = 'GREEN' | 'ORANGE' | 'RED' | 'DEGRADED';
 export type SpatialPrecision = 'EXACT_MICRODISTRICT' | 'CITY_AREA' | 'RAION_SECTOR' | 'REGIONAL_CORRIDOR';
+export type EventStatus = 'active' | 'stale' | 'cleared';
 
 export interface ThreatEvent {
   id: string;
@@ -13,6 +14,16 @@ export interface ThreatEvent {
   category: ThreatCategory;
   categoryNameUk: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
+
+  // Strict Event Lifecycle
+  createdAt: string;       // ISO timestamp of first message
+  lastConfirmedAt: string; // ISO timestamp of latest confirming message
+  lastSourceAt: string;    // ISO timestamp of latest raw message
+  status: EventStatus;     // 'active' | 'stale' | 'cleared'
+  statusBadgeUk: string;   // 'Активна ціль' | 'Застаріла ціль' | 'Відбій / Знищено'
+  ttlMinutes: number;      // Category TTL in minutes without fresh update
+  ageMinutes: number;      // Minutes since last confirmation
+
   detectedLocation: string;
   detectedOblast: string;
   spatialPrecision: SpatialPrecision;
@@ -67,26 +78,53 @@ export function evaluateLocalSecurity(
   const threatEvents: ThreatEvent[] = [];
   const nearestUserLoc = findNearestLocation(userLat, userLng);
   const now = Date.now();
-  const maxMessageAgeMs = 45 * 60 * 1000; // 45 minutes
+  
+  // Maximum message retention window (30 minutes)
+  const maxMessageAgeMs = 30 * 60 * 1000;
 
   const isDataStale = lastIngestTimeMs ? (now - lastIngestTimeMs > 90 * 1000) : false;
 
-  // Filter fresh messages
+  // Filter fresh messages within max retention window
   const freshMessages = telegramMessages.filter(m => (now - m.unixTimestamp) <= maxMessageAgeMs);
 
   // Cluster Telegram messages to eliminate duplicate repost noise and extract true provenance
   const clusters = clusterTelegramMessages(freshMessages);
 
-  // 1. Process Message Clusters
+  // 1. First pass: Collect all clear signals to terminate corresponding threats
+  const allClearLocations = new Set<string>();
+  const allClearOblasts = new Set<string>();
+
+  for (const cluster of clusters) {
+    const classification = classifyThreat(cluster.representativeMessage.text);
+    if (classification.isAllClear) {
+      const geoResult = extractGeoFromText(cluster.representativeMessage.text);
+      for (const loc of geoResult.locations) {
+        allClearLocations.add(loc.name.toLowerCase());
+      }
+      for (const zone of geoResult.regionalZones) {
+        allClearOblasts.add(zone.oblast.toLowerCase());
+      }
+    }
+  }
+
+  // 2. Process Message Clusters & Build Event Lifecycle
   for (const cluster of clusters) {
     const repMsg = cluster.representativeMessage;
     const classification = classifyThreat(repMsg.text);
     const geoResult = extractGeoFromText(repMsg.text);
 
-    const timeAgoMinutes = Math.max(1, Math.round((now - cluster.earliestTimestamp) / 60000));
-    const timeFreshnessText = timeAgoMinutes <= 1 ? 'щойно' : `${timeAgoMinutes} хв тому`;
+    const createdAtIso = new Date(cluster.earliestTimestamp).toISOString();
+    const lastConfirmedAtIso = new Date(cluster.latestTimestamp).toISOString();
+    const lastSourceAtIso = repMsg.timeIso;
 
-    // A. Handle ALL CLEAR
+    const ageFromLastConfirmMs = Math.max(0, now - cluster.latestTimestamp);
+    const ageMinutes = Math.max(0, Math.floor(ageFromLastConfirmMs / 60000));
+    const timeFreshnessText = ageMinutes <= 1 ? 'щойно' : `${ageMinutes} хв тому`;
+
+    const ttlMinutes = classification.ttlMinutes || getThreatTtlMinutes(classification.category);
+    const ttlMs = ttlMinutes * 60 * 1000;
+
+    // A. Handle ALL CLEAR Events
     if (classification.isAllClear) {
       for (const loc of geoResult.locations) {
         const dist = calculateDistanceKm(userLat, userLng, loc.lat, loc.lng);
@@ -106,6 +144,13 @@ export function evaluateLocalSecurity(
             category: 'ALL_CLEAR',
             categoryNameUk: 'Відбій / Чисто',
             severity: 'INFO',
+            createdAt: createdAtIso,
+            lastConfirmedAt: lastConfirmedAtIso,
+            lastSourceAt: lastSourceAtIso,
+            status: 'cleared',
+            statusBadgeUk: 'Відбій / Чисто',
+            ttlMinutes,
+            ageMinutes,
             detectedLocation: loc.name,
             detectedOblast: loc.oblast,
             spatialPrecision: loc.type === 'microdistrict' ? 'EXACT_MICRODISTRICT' : loc.type === 'city' ? 'CITY_AREA' : 'RAION_SECTOR',
@@ -145,9 +190,36 @@ export function evaluateLocalSecurity(
       continue;
     }
 
+    // Determine lifecycle status based on category TTL and explicit clear signals
+    let status: EventStatus = 'active';
+    let statusBadgeUk = 'Активна ціль';
+
+    if (ageFromLastConfirmMs > ttlMs) {
+      if (ageFromLastConfirmMs > ttlMs + (5 * 60 * 1000)) {
+        status = 'cleared';
+        statusBadgeUk = 'Загроза минула (Вичерпано TTL)';
+      } else {
+        status = 'stale';
+        statusBadgeUk = 'Застаріла ціль (Очікується оновлення)';
+      }
+    }
+
     // B. Match Specific Known Locations (Towns, Microdistricts, Cities)
     if (geoResult.isSpecificLocationFound) {
       for (const loc of geoResult.locations) {
+        // If an explicit all-clear was received for this location, mark cleared immediately
+        let locStatus = status;
+        let locStatusBadgeUk = statusBadgeUk;
+        if (allClearLocations.has(loc.name.toLowerCase())) {
+          locStatus = 'cleared';
+          locStatusBadgeUk = 'Відбій у секторі';
+        }
+
+        // If cleared and completely expired beyond grace period, skip adding to threat list
+        if (locStatus === 'cleared' && ageFromLastConfirmMs > ttlMs) {
+          continue;
+        }
+
         const dist = calculateDistanceKm(userLat, userLng, loc.lat, loc.lng);
         const isDirect = dist <= userRadiusKm;
         const isFlugerCoverage = dist <= 60.0;
@@ -211,6 +283,13 @@ export function evaluateLocalSecurity(
             category: classification.category,
             categoryNameUk: classification.categoryNameUk,
             severity: isDirect ? classification.severity : 'MEDIUM',
+            createdAt: createdAtIso,
+            lastConfirmedAt: lastConfirmedAtIso,
+            lastSourceAt: lastSourceAtIso,
+            status: locStatus,
+            statusBadgeUk: locStatusBadgeUk,
+            ttlMinutes,
+            ageMinutes,
             detectedLocation: loc.name,
             detectedOblast: loc.oblast,
             spatialPrecision,
@@ -231,9 +310,9 @@ export function evaluateLocalSecurity(
               `✓ Знайдено у тексті: «${geoResult.matchedKeywords.join(', ') || loc.name}»`,
               `✓ Джерело: @${cluster.primaryChannel} (${cluster.primaryChannelTitle}, вага ${cluster.effectiveAuthority.toFixed(2)})`,
               `✓ Підтвердження: ${cluster.sourceSummaryText}`,
-              `✓ Час: ${timeFreshnessText}`
+              `✓ Час: ${timeFreshnessText} (TTL: ${ttlMinutes} хв)`
             ],
-            requiresImmediateShelter: isDirect && classification.requiresImmediateShelter,
+            requiresImmediateShelter: isDirect && classification.requiresImmediateShelter && locStatus === 'active',
             rawText: repMsg.text,
             timestamp: repMsg.timeIso,
             voiceAlertText,
@@ -249,6 +328,17 @@ export function evaluateLocalSecurity(
       for (const zone of geoResult.regionalZones) {
         // Check if user is in this oblast
         if (nearestUserLoc.location.oblast === zone.oblast) {
+          let regStatus = status;
+          let regStatusBadgeUk = statusBadgeUk;
+          if (allClearOblasts.has(zone.oblast.toLowerCase())) {
+            regStatus = 'cleared';
+            regStatusBadgeUk = 'Відбій по області';
+          }
+
+          if (regStatus === 'cleared' && ageFromLastConfirmMs > ttlMs) {
+            continue;
+          }
+
           const bearing = calculateBearingDegrees(userLat, userLng, zone.centerLat, zone.centerLng);
           const sector = getBearingSectorUk(bearing);
 
@@ -259,6 +349,13 @@ export function evaluateLocalSecurity(
             category: classification.category,
             categoryNameUk: classification.categoryNameUk,
             severity: 'MEDIUM', // Regional notice is ALWAYS Attention (ORANGE), never Direct Red
+            createdAt: createdAtIso,
+            lastConfirmedAt: lastConfirmedAtIso,
+            lastSourceAt: lastSourceAtIso,
+            status: regStatus,
+            statusBadgeUk: regStatusBadgeUk,
+            ttlMinutes,
+            ageMinutes,
             detectedLocation: zone.name,
             detectedOblast: zone.oblast,
             spatialPrecision: 'REGIONAL_CORRIDOR',
@@ -278,7 +375,7 @@ export function evaluateLocalSecurity(
               '⚠️ Точне місцезнаходження цілі не вказано у повідомленні',
               `✓ Загроза стосується вашої області: ${zone.name}`,
               `✓ Джерело: @${cluster.primaryChannel} (${cluster.primaryChannelTitle})`,
-              `✓ Час: ${timeFreshnessText}`
+              `✓ Час: ${timeFreshnessText} (TTL: ${ttlMinutes} хв)`
             ],
             requiresImmediateShelter: false,
             rawText: repMsg.text,
@@ -293,7 +390,7 @@ export function evaluateLocalSecurity(
     }
   }
 
-  // 2. Determine Overall Security State (3-Tier Model + honest degraded)
+  // 3. Determine Overall Security State (Strictly considering ONLY active tactical threats)
   let overallState: SecurityState = 'GREEN';
   let stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
   let stateDescriptionUk = 'Локальних загроз поблизу не виявлено. Джерела сканують ваш сектор.';
@@ -304,9 +401,10 @@ export function evaluateLocalSecurity(
     stateBadgeUk = 'МОНІТОРИНГ НЕПОВНИЙ';
     stateDescriptionUk = 'Дані застаріли (>90с) або відсутній зв’язок із радарними джерелами.';
   } else {
-    // Sort threats: Direct Critical first, then closest distance
-    const criticalDirectThreats = threatEvents.filter(t => t.requiresImmediateShelter && t.isWithinRadius && t.category !== 'ALL_CLEAR');
-    const warningThreats = threatEvents.filter(t => t.category !== 'ALL_CLEAR');
+    // ACTIVE THREATS ONLY: Ignore stale, cleared, or all-clear events for active alert status
+    const activeThreats = threatEvents.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
+    const criticalDirectThreats = activeThreats.filter(t => t.requiresImmediateShelter && t.isWithinRadius);
+    const warningThreats = activeThreats;
 
     if (criticalDirectThreats.length > 0) {
       overallState = 'RED';
@@ -318,6 +416,10 @@ export function evaluateLocalSecurity(
       primaryThreat = warningThreats[0];
       stateBadgeUk = 'УВАГА В ОБЛАСТІ';
       stateDescriptionUk = primaryThreat.confidenceReason;
+    } else {
+      overallState = 'GREEN';
+      stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
+      stateDescriptionUk = 'Локальних загроз поблизу не виявлено. Джерела сканують ваш сектор.';
     }
   }
 
@@ -338,3 +440,4 @@ export function evaluateLocalSecurity(
     isDataStale
   };
 }
+

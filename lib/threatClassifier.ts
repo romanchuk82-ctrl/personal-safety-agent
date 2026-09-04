@@ -18,7 +18,37 @@ export interface ThreatClassification {
   isAllClear: boolean;
   requiresImmediateShelter: boolean;
   rawKeywordsMatched: string[];
+  ttlMinutes: number;
 }
+
+/**
+ * Returns conservative Time-To-Live (TTL) in minutes for each threat category
+ * without receiving fresh confirmation.
+ */
+export function getThreatTtlMinutes(category: ThreatCategory): number {
+  switch (category) {
+    case 'BALLISTIC':
+      return 8; // Балістика / Швидкісна ціль: 8 хв (надзвичайно швидкий підліт)
+    case 'KAB':
+      return 12; // Керована авіабомба (КАБ/ФАБ): 12 хв (планування 3-7 хв)
+    case 'CRUISE_MISSILE':
+      return 12; // Крилата ракета: 12 хв (~15 км/хв)
+    case 'UAV_STRIKE':
+      return 18; // Ударний БпЛА (Шахед): 18 хв без нового радарного спостереження
+    case 'UAV_RECON':
+      return 20; // Розвідувальний БпЛА: 20 хв
+    case 'EXPLOSION':
+      return 10; // Зафіксовано вибух: 10 хв
+    case 'ARTILLERY':
+      return 12; // Артобстріл / РСЗВ: 12 хв
+    case 'ALL_CLEAR':
+      return 10; // Відбій / Чисто: 10 хв
+    case 'GENERAL_AIR_RAID':
+    default:
+      return 15; // Загальна тривога: 15 хв
+  }
+}
+
 
 
 export function classifyThreat(text: string): ThreatClassification {
@@ -39,6 +69,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: true,
         requiresImmediateShelter: false,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('ALL_CLEAR'),
       };
     }
   }
@@ -66,6 +97,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('KAB'),
       };
     }
   }
@@ -84,6 +116,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('BALLISTIC'),
       };
     }
   }
@@ -102,6 +135,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('CRUISE_MISSILE'),
       };
     }
   }
@@ -120,6 +154,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('UAV_STRIKE'),
       };
     }
   }
@@ -138,6 +173,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('EXPLOSION'),
       };
     }
   }
@@ -156,6 +192,7 @@ export function classifyThreat(text: string): ThreatClassification {
         isAllClear: false,
         requiresImmediateShelter: true,
         rawKeywordsMatched: matchedKeywords,
+        ttlMinutes: getThreatTtlMinutes('ARTILLERY'),
       };
     }
   }
@@ -170,5 +207,6 @@ export function classifyThreat(text: string): ThreatClassification {
     isAllClear: false,
     requiresImmediateShelter: false,
     rawKeywordsMatched: ['загальна тривога'],
+    ttlMinutes: getThreatTtlMinutes('GENERAL_AIR_RAID'),
   };
 }

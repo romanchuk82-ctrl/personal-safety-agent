@@ -472,7 +472,7 @@ export default function HomePage() {
   const isGreen = !isRed && !isOrange && !isDegraded && isActive;
 
   const radarThreats = (evaluation?.threatEvents || []).filter(
-    (t) => t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && t.distanceKm !== null && t.distanceKm <= 45
+    (t) => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && t.distanceKm !== null && t.distanceKm <= 45
   );
 
   return (

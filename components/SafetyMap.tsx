@@ -245,7 +245,7 @@ export default function SafetyMap({
     threatLayersRef.current.forEach(layer => map.removeLayer(layer));
     threatLayersRef.current = [];
 
-    const activeThreats = threats.filter(t => t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
+    const activeThreats = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
 
     activeThreats.forEach((threat) => {
       const isCritical = threat.severity === 'CRITICAL' || (threat.distanceKm !== null && threat.distanceKm <= 15);
@@ -347,6 +347,8 @@ export default function SafetyMap({
     mapInstanceRef.current.zoomOut();
   }, []);
 
+  const activeThreatsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID').length;
+
   return (
     <div className="relative w-full rounded-3xl overflow-hidden border border-[#1a2538] bg-[#070b14] shadow-2xl transition-all">
       {/* MAP TOP STATUS BAR */}
@@ -361,10 +363,10 @@ export default function SafetyMap({
           </span>
         </div>
 
-        {threats.length > 0 && (
+        {activeThreatsCount > 0 && (
           <div className="pointer-events-auto bg-red-950/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-red-500/80 shadow-lg flex items-center gap-1.5 text-red-300 text-[11px] font-bold">
             <AlertTriangle className="w-3.5 h-3.5 text-red-400 animate-bounce" />
-            <span>{threats.length} {threats.length === 1 ? 'ціль' : 'цілі'}</span>
+            <span>{activeThreatsCount} {activeThreatsCount === 1 ? 'ціль' : 'цілі'}</span>
           </div>
         )}
       </div>
@@ -414,7 +416,7 @@ export default function SafetyMap({
             <span className="w-2.5 h-0.5 border-t border-dashed border-blue-400 inline-block"></span>
             <span>Зона {radiusKm} км</span>
           </span>
-          {threats.length > 0 && (
+          {activeThreatsCount > 0 && (
             <span className="flex items-center gap-1 text-red-400">
               <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
               <span>Загроза (клік для деталей)</span>
@@ -435,7 +437,16 @@ export default function SafetyMap({
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-white leading-tight">{selectedThreat.categoryNameUk}</h4>
-                  <p className="text-[10px] text-slate-400 font-mono">{selectedThreat.detectedLocation}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] text-slate-400 font-mono">{selectedThreat.detectedLocation}</span>
+                    <span className={'text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ' + (
+                      selectedThreat.status === 'active' ? 'bg-red-950 text-red-400 border border-red-800' :
+                      selectedThreat.status === 'stale' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                      'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                    )}>
+                      {selectedThreat.statusBadgeUk || (selectedThreat.status === 'active' ? 'Активна ціль' : 'Відбій')}
+                    </span>
+                  </div>
                 </div>
               </div>
               <button
@@ -461,8 +472,10 @@ export default function SafetyMap({
                 <span className="font-bold text-amber-300 font-mono">{selectedThreat.confidenceUk || 'Підтверджено'}</span>
               </div>
               <div className="bg-[#070b14] p-2 rounded-xl border border-slate-800">
-                <span className="text-slate-400 block">📡 Джерела:</span>
-                <span className="font-bold text-emerald-400 font-mono">{selectedThreat.sourceSummaryText || '1 джерело'}</span>
+                <span className="text-slate-400 block">⏱️ Життєвий цикл:</span>
+                <span className="font-bold text-emerald-400 font-mono">
+                  {selectedThreat.ageMinutes !== undefined ? `${selectedThreat.ageMinutes} хв тому (TTL: ${selectedThreat.ttlMinutes} хв)` : selectedThreat.sourceSummaryText || '1 джерело'}
+                </span>
               </div>
             </div>
 
