@@ -337,8 +337,13 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     const validator = new LocationValidator(null, 'AUTO');
     const baseTime = 1700000000000;
 
-    // Встановлюємо надійну позицію в Києві
-    validator.setManualLocation(KYIV_CENTER.lat, KYIV_CENTER.lng, KYIV_CENTER.name, 'Київська область', baseTime);
+    // Встановлюємо надійну позицію в Києві через початковий GPS-вимір
+    validator.processOnDemandGps({
+      lat: KYIV_CENTER.lat,
+      lng: KYIV_CENTER.lng,
+      accuracy: 10,
+      timestamp: baseTime
+    });
     const initialTrusted = validator.getTrustedLocation()!;
 
     // 1. Спроба оновити GPS з аномальним стрибком 450 км за 10 секунд

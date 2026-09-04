@@ -601,8 +601,8 @@ export class LocationValidator {
       };
     }
 
-    // 3. Kinematic consistency check if current trusted location exists
-    if (this.currentTrusted) {
+    // 3. Kinematic consistency check if current trusted location exists from previous genuine GPS fix
+    if (this.currentTrusted && this.currentTrusted.rawGpsSample) {
       const distKm = calculateDistanceKm(
         this.currentTrusted.lat,
         this.currentTrusted.lng,
