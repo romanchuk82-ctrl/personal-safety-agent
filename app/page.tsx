@@ -37,7 +37,7 @@ import { fetchActiveAlerts } from '@/lib/sources/alertsInUa';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState } from '@/lib/matcher';
 import { findNearestLocation } from '@/lib/gazetteer';
-import { unlockAudioAndSpeech, playTacticalSiren, speakUkrainian, stopAllAudio } from '@/lib/soundService';
+import { unlockAudioAndSpeech, speakUkrainian, stopAllAudio } from '@/lib/soundService';
 
 interface LocationState {
   lat: number;
@@ -76,7 +76,7 @@ export default function HomePage() {
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
-  const [voiceTestStatus, setVoiceTestStatus] = useState<string>('');
+  const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
   
   // Test Push Modal State
   const [showTestModal, setShowTestModal] = useState<boolean>(false);
@@ -94,7 +94,7 @@ export default function HomePage() {
   const lastSpokenAlertIdRef = useRef<string | null>(null);
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto unlock on first user touch
+  // Auto unlock audio and speech on first user touch
   useEffect(() => {
     const handleFirstTouch = () => {
       unlockAudioAndSpeech();
@@ -111,7 +111,6 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    // Load audio enabled preference
     const storedAudio = localStorage.getItem('psa_audio_enabled');
     if (storedAudio !== null) {
       setAudioEnabled(storedAudio === 'true');
@@ -177,12 +176,12 @@ export default function HomePage() {
 
     if (!nextState) {
       stopAllAudio();
-      setVoiceTestStatus('🔇 Звук та голос ВИМКНЕНО (Тихий режим)');
-      setTimeout(() => setVoiceTestStatus(''), 3000);
+      setVoiceStatusMessage('🔇 Голосові сповіщення ВИМКНЕНО (Тихий режим)');
+      setTimeout(() => setVoiceStatusMessage(''), 3000);
     } else {
       unlockAudioAndSpeech();
-      setVoiceTestStatus('🔊 Звук та голос УВІМКНЕНО');
-      setTimeout(() => setVoiceTestStatus(''), 3000);
+      setVoiceStatusMessage('🔊 Голосові сповіщення УВІМКНЕНО (Режим як в Ajax)');
+      setTimeout(() => setVoiceStatusMessage(''), 3000);
     }
   };
 
@@ -191,11 +190,9 @@ export default function HomePage() {
     localStorage.setItem('psa_radius_km', newRadius.toString());
   };
 
+  // PURE CLEAN VOICE ALERT (No sirens)
   const speakAlert = useCallback((text: string) => {
-    if (!audioEnabled) {
-      // Muted: do not play sound
-      return;
-    }
+    if (!audioEnabled) return;
     unlockAudioAndSpeech();
     speakUkrainian(text);
   }, [audioEnabled]);
@@ -205,22 +202,12 @@ export default function HomePage() {
     if (!audioEnabled) {
       handleToggleAudio(true);
     }
-    setVoiceTestStatus('Вимовляю повідомлення...');
+    setVoiceStatusMessage('Вимовляю голосове сповіщення...');
     speakUkrainian(
-      'Кириле, увага! Голосовий асистент безпеки перевірено. Сирена та голос працюють на повну гучність.',
-      () => setVoiceTestStatus('Звук активний! 🔊'),
-      () => setTimeout(() => setVoiceTestStatus(''), 4000)
+      'Увага! Тестове сповіщення системи безпеки. Голос диктора працює чітко та надійно.',
+      () => setVoiceStatusMessage('Голос активний! 🔊'),
+      () => setTimeout(() => setVoiceStatusMessage(''), 4000)
     );
-  };
-
-  const handleManualSirenTest = () => {
-    unlockAudioAndSpeech();
-    if (!audioEnabled) {
-      handleToggleAudio(true);
-    }
-    setVoiceTestStatus('Тест сирени... 🚨');
-    playTacticalSiren(2.0, 0.6);
-    setTimeout(() => setVoiceTestStatus(''), 3000);
   };
 
   const performSecurityCheck = useCallback(async (currentLoc: LocationState) => {
@@ -255,7 +242,7 @@ export default function HomePage() {
         lastCheckIso: new Date().toISOString()
       });
 
-      // TRIGGER AUDIO/VOICE ONLY ON RED THREAT & IF AUDIO IS ENABLED
+      // TRIGGER VOICE ANNOUNCEMENT ON RED THREAT
       if (result.overallState === 'RED' && result.primaryThreat) {
         if (lastSpokenAlertIdRef.current !== result.primaryThreat.id) {
           lastSpokenAlertIdRef.current = result.primaryThreat.id;
@@ -356,6 +343,7 @@ export default function HomePage() {
     }
   };
 
+  // LOCKED SCREEN PUSH + VOICE TEST (Ajax style)
   const startEmergencyPushTest = async () => {
     if (audioEnabled) {
       unlockAudioAndSpeech();
@@ -370,13 +358,15 @@ export default function HomePage() {
       } catch (e) {}
     }
 
+    const testVoicePhrase = "Увага! Тестове голосове сповіщення системи безпеки. Канал зв'язку працює у штатному режимі.";
+
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
       navigator.serviceWorker.controller.postMessage({
         type: 'SCHEDULE_TEST_ALERT',
         delayMs: 5000,
-        title: '🚨 ТЕСТОВЕ АВАРІЙНЕ СПОВІЩЕННЯ',
-        body: 'Кириле, перевірка каналу сповіщення на замкнений екран успішна!',
-        voiceText: audioEnabled ? 'Увага! Тестова перевірка системи безпеки пройшла успішно. Сповіщення надіслано на замкнений екран.' : ''
+        title: '🚨 ТЕСТОВЕ ГОЛОСОВЕ СПОВІЩЕННЯ',
+        body: 'Кириле, сповіщення на замкнений екран надійшло успішно!',
+        voiceText: audioEnabled ? testVoicePhrase : ''
       });
     }
 
@@ -388,7 +378,7 @@ export default function HomePage() {
         clearInterval(timer);
         setTestCompleted(true);
         if (audioEnabled) {
-          speakAlert('Увага! Тестова перевірка пройшла успішно. Канал аварійного сповіщення активний.');
+          speakAlert(testVoicePhrase);
         }
       }
     }, 1000);
@@ -467,7 +457,7 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[#070a10] text-slate-100 pb-16 selection:bg-blue-500 selection:text-white font-sans antialiased">
-      {/* MINIMAL TOP BAR */}
+      {/* TOP HEADER */}
       <header className="sticky top-0 z-40 bg-[#0c101a]/95 backdrop-blur-md border-b border-[#182234] px-4 py-3">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -476,7 +466,7 @@ export default function HomePage() {
               <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
                 <span>ВАРТОВИЙ БЕЗПЕКИ</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-950 text-blue-400 border border-blue-800/60">
-                  v3.2
+                  AJAX-VOICE
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400">
@@ -485,7 +475,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* DEDICATED PROMINENT SOUND TOGGLE BUTTON */}
+          {/* DEDICATED SOUND TOGGLE */}
           <button
             onClick={() => handleToggleAudio()}
             className={'px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ' + (
@@ -493,16 +483,16 @@ export default function HomePage() {
                 ? 'bg-blue-950/80 border-blue-500/50 text-blue-300 hover:bg-blue-900/80'
                 : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
             )}
-            title={audioEnabled ? 'Натисніть, щоб вимкнути звук (Тихий режим)' : 'Натисніть, щоб увімкнути звук'}
+            title={audioEnabled ? 'Вимкнути голос (Тихий режим)' : 'Увімкнути голос'}
           >
             {audioEnabled ? (
               <>
-                <Volume2 className="w-4 h-4 text-blue-400 animate-pulse" />
-                <span>ЗВУК УВІМКНЕНО</span>
+                <Volume2 className="w-4 h-4 text-blue-400" />
+                <span>ГОЛОС УВІМКНЕНО</span>
               </>
             ) : (
               <>
-                <VolumeX className="w-4 h-4 text-red-400" />
+                <VolumeX className="w-4 h-4 text-slate-500" />
                 <span className="text-slate-400">ТИХИЙ РЕЖИМ</span>
               </>
             )}
@@ -513,25 +503,18 @@ export default function HomePage() {
       {/* MAIN CONTAINER */}
       <div className="max-w-md mx-auto px-4 pt-4">
 
-        {/* VOICE & SIREN QUICK CONTROLS */}
-        <div className="mb-3 grid grid-cols-3 gap-1.5">
+        {/* VOICE QUICK CONTROLS */}
+        <div className="mb-3 flex items-center gap-2">
           <button
             onClick={handleManualVoiceTest}
-            className="py-2 px-2 rounded-xl bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 font-bold text-[11px] border border-blue-800/80 flex items-center justify-center gap-1 transition-all active:scale-95"
+            className="flex-1 py-2 px-3 rounded-xl bg-blue-950/70 hover:bg-blue-900/70 text-blue-300 font-bold text-xs border border-blue-800/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
           >
             <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-            <span>Тест голосу</span>
-          </button>
-          <button
-            onClick={handleManualSirenTest}
-            className="py-2 px-2 rounded-xl bg-red-950/60 hover:bg-red-900/60 text-red-300 font-bold text-[11px] border border-red-800/80 flex items-center justify-center gap-1 transition-all active:scale-95"
-          >
-            <Flame className="w-3.5 h-3.5 text-red-400" />
-            <span>Тест сирени</span>
+            <span>ТЕСТ ГОЛОСУ ДИКТОРУ 🔊</span>
           </button>
           <button
             onClick={() => handleToggleAudio()}
-            className={'py-2 px-2 rounded-xl font-bold text-[11px] border flex items-center justify-center gap-1 transition-all active:scale-95 ' + (
+            className={'py-2 px-3 rounded-xl font-bold text-xs border flex items-center justify-center gap-1.5 transition-all active:scale-95 ' + (
               audioEnabled
                 ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
                 : 'bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border-amber-800/80'
@@ -542,9 +525,9 @@ export default function HomePage() {
           </button>
         </div>
 
-        {voiceTestStatus && (
+        {voiceStatusMessage && (
           <div className="mb-3 p-2 rounded-xl bg-blue-950 text-blue-200 text-xs font-bold text-center border border-blue-700 animate-pulse">
-            {voiceTestStatus}
+            {voiceStatusMessage}
           </div>
         )}
 
@@ -592,7 +575,7 @@ export default function HomePage() {
 
           <p className="text-xs text-slate-200 mt-3 leading-relaxed font-medium">
             {!isActive
-              ? 'Натисніть кнопку «Активувати захист», заблокуйте iPhone та покладіть у кишеню. Система попередить вас звуком у разі небезпеки.'
+              ? 'Натисніть кнопку «Активувати захист», заблокуйте iPhone та покладіть у кишеню. Система оголосить небезпеку голосом на замкненому екрані.'
               : isRed
               ? evaluation?.primaryThreat?.confidenceReason || 'Підтверджено пряму загрозу у вашому секторі! Негайно пройдіть в укриття!'
               : isOrange
@@ -621,12 +604,12 @@ export default function HomePage() {
                 <span className="text-[10px] text-emerald-400 font-mono">159 джерел</span>
               </div>
               <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-400 block font-mono">🛡️ РЕЖИМ СПОВІЩЕНЬ</span>
+                <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
                 <span className="font-bold text-white block">
-                  {audioEnabled ? '🔊 Звук + Голос' : '🔇 Тихий режим'}
+                  {audioEnabled ? '🔊 Голос диктора (Ajax)' : '🔇 Тихий режим'}
                 </span>
                 <span className={'text-[10px] font-mono ' + (audioEnabled ? 'text-blue-400' : 'text-amber-400')}>
-                  {audioEnabled ? 'Сирена активна' : 'Без звукових сигналів'}
+                  {audioEnabled ? 'Оголошення активне' : 'Без звуку'}
                 </span>
               </div>
             </div>
@@ -669,7 +652,7 @@ export default function HomePage() {
             className="w-full py-3.5 px-4 rounded-2xl bg-[#121926] hover:bg-[#1a2436] text-amber-300 hover:text-amber-200 font-bold text-xs tracking-wide border border-amber-500/40 flex items-center justify-center gap-2 transition-all shadow-md"
           >
             <Bell className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span>ПЕРЕВІРИТИ СПОВІЩЕННЯ НА ЗАМКНЕНИЙ ЕКРАН (5С)</span>
+            <span>ПЕРЕВІРИТИ ГОЛОС НА ЗАМКНЕНОМУ ЕКРАНІ (5С)</span>
           </button>
         </div>
 
@@ -793,12 +776,12 @@ export default function HomePage() {
 
           {showAdvanced && (
             <div className="mt-4 pt-4 border-t border-slate-800 space-y-4 text-xs">
-              {/* AUDIO & SOUND MODE TOGGLE */}
+              {/* AUDIO & VOICE DIAGNOSTICS */}
               <div className="p-3 bg-[#101726] rounded-xl border border-blue-900/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-blue-300 font-bold block flex items-center gap-1.5">
                     <Megaphone className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Звукові та голосові оповіщення</span>
+                    <span>Голосове сповіщення (Режим Ajax)</span>
                   </span>
                   <button
                     onClick={() => handleToggleAudio()}
@@ -813,21 +796,15 @@ export default function HomePage() {
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
                   {audioEnabled
-                    ? 'У разі локальної небезпеки (КАБ, балістика, дрон) пролунає сирена та чітке голосове попередження українською мовою.'
-                    : 'Тихий режим активний. Звукові сигнали та голос вимкнено. Сповіщення відображатимуться лише візуально та через push.'}
+                    ? 'При загрозі пролунає чітке голосове сповіщення диктора українською мовою без штучних сигналів сирен.'
+                    : 'Тихий режим. Голосові сповіщення вимкнено.'}
                 </p>
-                <div className="flex gap-2 pt-1">
+                <div className="pt-1">
                   <button
                     onClick={handleManualVoiceTest}
-                    className="flex-1 py-1.5 px-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-[10px]"
+                    className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs shadow-md"
                   >
-                    Тест голосу 🔊
-                  </button>
-                  <button
-                    onClick={handleManualSirenTest}
-                    className="flex-1 py-1.5 px-2 bg-red-700 hover:bg-red-600 text-white rounded-lg font-bold text-[10px]"
-                  >
-                    Тест сирени 🚨
+                    Прослухати голос диктора 🔊
                   </button>
                 </div>
               </div>
@@ -958,7 +935,7 @@ export default function HomePage() {
             </div>
 
             <div>
-              <h3 className="font-black text-lg text-white">ТЕСТУВАННЯ СПОВІЩЕННЯ</h3>
+              <h3 className="font-black text-lg text-white">ТЕСТУВАННЯ ГОЛОСУ НА ЕКРАНІ БЛОКУВАННЯ</h3>
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
                 Зараз <strong>заблокуйте iPhone</strong> та покладіть його на стіл або в кишеню.
               </p>
@@ -970,7 +947,7 @@ export default function HomePage() {
                   00:0{testCountdown}
                 </span>
                 <p className="text-[11px] text-slate-400 mt-1 font-mono">
-                  Справжнє push-сповіщення надійде через {testCountdown}с
+                  Сповіщення з голосом надійде через {testCountdown}с
                 </p>
               </div>
             ) : (
@@ -980,7 +957,7 @@ export default function HomePage() {
                   <span>СПОВІЩЕННЯ НАДІСЛАНО</span>
                 </div>
                 <p className="text-[11px] text-slate-300">
-                  {audioEnabled ? 'Звук і пуш на заблокований екран перевірено.' : 'Пуш на заблокований екран перевірено (Тихий режим).'}
+                  {audioEnabled ? 'Голосове сповіщення надіслано на заблокований екран.' : 'Сповіщення надіслано (Тихий режим).'}
                 </p>
               </div>
             )}

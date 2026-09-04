@@ -1,4 +1,4 @@
-// Dedicated Sound & Voice Assistant Service for iOS / Safari / Android / Desktop
+// Pure Voice Assistant Service (Ajax-style clean voice announcement for iOS/Android)
 let globalAudioCtx: AudioContext | null = null;
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
@@ -13,7 +13,7 @@ export function getAudioContext(): AudioContext | null {
   return globalAudioCtx;
 }
 
-// Pre-warm and unlock audio context and SpeechSynthesis on direct user interaction
+// Pre-warm and unlock audio context and SpeechSynthesis on user touch
 export function unlockAudioAndSpeech(): void {
   if (typeof window === 'undefined') return;
 
@@ -61,55 +61,28 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   };
 }
 
-// Play multi-tone tactical alarm siren
-export function playTacticalSiren(durationSec: number = 1.2, volume: number = 0.5): void {
+export function stopAllAudio(): void {
+  if (typeof window === 'undefined') return;
   try {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
-
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sawtooth';
-    // Modulating alarm frequency: 700Hz -> 1200Hz -> 750Hz -> 1300Hz
-    osc.frequency.setValueAtTime(700, now);
-    osc.frequency.linearRampToValueAtTime(1200, now + 0.3);
-    osc.frequency.linearRampToValueAtTime(750, now + 0.6);
-    osc.frequency.linearRampToValueAtTime(1300, now + 0.9);
-    osc.frequency.linearRampToValueAtTime(800, now + durationSec);
-
-    gain.gain.setValueAtTime(volume, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + durationSec);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start(now);
-    osc.stop(now + durationSec);
-  } catch (err) {
-    console.warn('Siren play error:', err);
-  }
+  } catch (e) {}
 }
 
-// High-reliability Ukrainian speech announcement with siren preamble
+// Pure clean voice announcement (No synthetic sirens - Ajax style voice)
 export function speakUkrainian(text: string, onStart?: () => void, onEnd?: () => void): boolean {
   if (typeof window === 'undefined') return false;
 
-  // Always play audible siren
-  playTacticalSiren(0.8, 0.45);
-
   if (!('speechSynthesis' in window)) {
-    // If browser doesn't have TTS, play full alarm siren
-    playTacticalSiren(2.0, 0.6);
+    console.warn('SpeechSynthesis not supported on this browser');
     if (onEnd) onEnd();
     return false;
   }
 
   try {
+    stopAllAudio();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.95;
     utterance.pitch = 1.0;
@@ -122,7 +95,8 @@ export function speakUkrainian(text: string, onStart?: () => void, onEnd?: () =>
       v.lang.toLowerCase().includes('ua') || 
       v.name.toLowerCase().includes('ukrainian') || 
       v.name.toLowerCase().includes('lesya') || 
-      v.name.toLowerCase().includes('milena')
+      v.name.toLowerCase().includes('milena') ||
+      v.name.toLowerCase().includes('polina')
     );
 
     if (ukVoice) {
@@ -139,8 +113,7 @@ export function speakUkrainian(text: string, onStart?: () => void, onEnd?: () =>
     };
 
     utterance.onerror = (e) => {
-      console.warn('Speech synthesis error, falling back to siren tone:', e);
-      playTacticalSiren(1.5, 0.6);
+      console.warn('Speech synthesis error:', e);
       if (onEnd) onEnd();
     };
 
@@ -152,26 +125,14 @@ export function speakUkrainian(text: string, onStart?: () => void, onEnd?: () =>
       try {
         window.speechSynthesis.speak(utterance);
       } catch (e) {
-        console.warn('Speak trigger failed:', e);
-        playTacticalSiren(1.5, 0.6);
+        console.warn('Speak trigger error:', e);
       }
-    }, 250);
+    }, 100);
 
     return true;
   } catch (e) {
-    console.warn('speakUkrainian exception:', e);
-    playTacticalSiren(1.5, 0.6);
+    console.warn('speakUkrainian error:', e);
     if (onEnd) onEnd();
     return false;
   }
-}
-
-
-export function stopAllAudio(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-  } catch (e) {}
 }

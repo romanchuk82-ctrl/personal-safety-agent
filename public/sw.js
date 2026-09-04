@@ -1,5 +1,5 @@
-// Personal Safety Agent Service Worker (iOS 16.4+ & PWA)
-const CACHE_NAME = 'psa-v2';
+// Personal Safety Agent Service Worker (Ajax-style voice notification support)
+const CACHE_NAME = 'psa-v3';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -9,11 +9,11 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Real Web Push from Server / APNs
+// Web Push event from server
 self.addEventListener('push', (event) => {
   let data = {
-    title: '🚨 НЕБЕЗПЕКА ПОРУЧ!',
-    body: 'Підтверджено загрозу поблизу вашої локації. Негайно перейдіть в укриття!',
+    title: '🚨 УВАГА: Локальна небезпека!',
+    body: 'Пройдіть в укриття. Зафіксовано загрозу поблизу вашого району.',
     icon: './icons/icon-192x192.png',
     badge: './icons/icon-192x192.png',
     tag: 'personal-safety-alert',
@@ -38,13 +38,13 @@ self.addEventListener('push', (event) => {
     icon: data.icon || './icons/icon-192x192.png',
     badge: data.badge || './icons/icon-192x192.png',
     tag: data.tag || 'personal-safety-alert',
-    vibrate: [500, 150, 500, 150, 500, 150, 500],
+    sound: 'default',
+    vibrate: [400, 200, 400, 200, 400],
     requireInteraction: true,
     renotify: true,
     data: data.data || {},
     actions: [
-      { action: 'open', title: '🛡️ Відкрити додаток' },
-      { action: 'dismiss', title: 'Зрозуміло' }
+      { action: 'open', title: '🛡️ Відкрити додаток' }
     ]
   };
 
@@ -53,13 +53,13 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Handle client messages (e.g. Schedule emergency test for locked iPhone)
+// Handle scheduled test notification for locked iPhone
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SCHEDULE_TEST_ALERT') {
     const delayMs = event.data.delayMs || 5000;
-    const title = event.data.title || '🚨 ТЕСТОВЕ АВАРІЙНЕ СПОВІЩЕННЯ';
-    const body = event.data.body || 'Тестова перевірка каналу сповіщення на замкнений екран пройшла успішно!';
-    const voiceText = event.data.voiceText || 'Увага! Тестова перевірка пройшла успішно. Канал аварійного сповіщення активний.';
+    const title = event.data.title || '🚨 ТЕСТОВЕ ГОЛОСОВЕ СПОВІЩЕННЯ';
+    const body = event.data.body || 'Кириле, сповіщення на замкнений екран надійшло успішно!';
+    const voiceText = event.data.voiceText || 'Увага! Тестове сповіщення системи безпеки. Голосовий супровід активний.';
 
     setTimeout(() => {
       self.registration.showNotification(title, {
@@ -67,7 +67,8 @@ self.addEventListener('message', (event) => {
         icon: './icons/icon-192x192.png',
         badge: './icons/icon-192x192.png',
         tag: 'emergency-test-alert',
-        vibrate: [500, 150, 500, 150, 500],
+        sound: 'default',
+        vibrate: [400, 200, 400, 200, 400],
         requireInteraction: true,
         renotify: true,
         data: {
@@ -85,10 +86,6 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
-  if (event.action === 'dismiss') {
-    return;
-  }
 
   const urlToOpen = (event.notification.data && event.notification.data.url) || './';
 
