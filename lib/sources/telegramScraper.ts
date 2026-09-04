@@ -1489,3 +1489,102 @@ export async function fetchAllTelegramFeeds(
 export function getAllMonitoredSources(): ChannelConfig[] {
   return MONITORED_CHANNELS;
 }
+
+
+export interface MessageCluster {
+  id: string;
+  representativeMessage: TelegramMessage;
+  primaryChannel: string;
+  primaryChannelTitle: string;
+  sourceCount: number;
+  sources: { username: string; title: string; weight: number }[];
+  effectiveAuthority: number;
+  earliestTimestamp: number;
+  latestTimestamp: number;
+  normalizedText: string;
+}
+
+export function cleanMessageText(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/@\w+/gi, '')
+    .replace(/\[\s*підписатися\s*\]/gi, '')
+    .replace(/підписатись|підпишись|подписаться/gi, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+export function calculateTextSimilarity(a: string, b: string): number {
+  if (a === b) return 1.0;
+  if (!a || !b) return 0;
+  const wordsA = new Set(a.split(' ').filter(w => w.length > 2));
+  const wordsB = new Set(b.split(' ').filter(w => w.length > 2));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let intersection = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++;
+  }
+  const union = wordsA.size + wordsB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+export function clusterTelegramMessages(messages: TelegramMessage[], timeWindowMs: number = 8 * 60 * 1000): MessageCluster[] {
+  const clusters: MessageCluster[] = [];
+
+  for (const msg of messages) {
+    const cleaned = cleanMessageText(msg.text);
+    if (cleaned.length < 5) continue;
+
+    let matchedCluster: MessageCluster | null = null;
+
+    for (const cluster of clusters) {
+      const timeDiff = Math.abs(msg.unixTimestamp - cluster.earliestTimestamp);
+      if (timeDiff <= timeWindowMs) {
+        const similarity = calculateTextSimilarity(cleaned, cluster.normalizedText);
+        if (similarity >= 0.55 || (cleaned.length > 20 && cluster.normalizedText.includes(cleaned.slice(0, 30))) || (cluster.normalizedText.length > 20 && cleaned.includes(cluster.normalizedText.slice(0, 30)))) {
+          matchedCluster = cluster;
+          break;
+        }
+      }
+    }
+
+    if (matchedCluster) {
+      if (!matchedCluster.sources.some(s => s.username === msg.channel)) {
+        matchedCluster.sources.push({
+          username: msg.channel,
+          title: msg.channelTitle,
+          weight: msg.authorityWeight
+        });
+        matchedCluster.sourceCount++;
+      }
+      if (msg.authorityWeight > matchedCluster.effectiveAuthority) {
+        matchedCluster.representativeMessage = msg;
+        matchedCluster.primaryChannel = msg.channel;
+        matchedCluster.primaryChannelTitle = msg.channelTitle;
+      }
+      matchedCluster.effectiveAuthority = Math.min(
+        1.0,
+        Math.max(...matchedCluster.sources.map(s => s.weight)) + (Math.min(matchedCluster.sourceCount - 1, 4) * 0.015)
+      );
+      matchedCluster.earliestTimestamp = Math.min(matchedCluster.earliestTimestamp, msg.unixTimestamp);
+      matchedCluster.latestTimestamp = Math.max(matchedCluster.latestTimestamp, msg.unixTimestamp);
+    } else {
+      clusters.push({
+        id: 'cluster_' + msg.id,
+        representativeMessage: msg,
+        primaryChannel: msg.channel,
+        primaryChannelTitle: msg.channelTitle,
+        sourceCount: 1,
+        sources: [{ username: msg.channel, title: msg.channelTitle, weight: msg.authorityWeight }],
+        effectiveAuthority: msg.authorityWeight,
+        earliestTimestamp: msg.unixTimestamp,
+        latestTimestamp: msg.unixTimestamp,
+        normalizedText: cleaned
+      });
+    }
+  }
+
+  return clusters;
+}

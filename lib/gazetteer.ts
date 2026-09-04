@@ -576,22 +576,47 @@ function escapeRegex(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function stemUkrainian(word: string): string {
+  if (word.length <= 4) return word;
+  return word.replace(/(ів|ова|ові|ову|овом|івка|івки|івку|івці|евка|евки|евку|ськ|ського|ському|ський|ська|ське|ської|ськими|ці|ем|ом|а|я|у|ю|е|є|и|і|ій|ою|ею)$/iu, '');
+}
+
 export function extractLocationsFromText(text: string): GeoLocation[] {
   const normalized = text.toLowerCase();
+  const words = normalized.split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 3);
+  const wordStems = words.map(stemUkrainian);
+
   const matched: GeoLocation[] = [];
   const seenNames = new Set<string>();
 
   for (const loc of UKRAINIAN_GAZETTEER) {
+    let hasMatch = false;
+
+    // 1. Check exact aliases
     for (const alias of loc.aliases) {
-      const escaped = escapeRegex(alias);
+      const aliasNorm = alias.toLowerCase();
+      const escaped = escapeRegex(aliasNorm);
       const regex = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}([^\\p{L}\\p{N}]|$)`, 'iu');
-      if (regex.test(normalized) || normalized.includes(alias)) {
-        if (!seenNames.has(loc.name)) {
-          matched.push(loc);
-          seenNames.add(loc.name);
-        }
+      if (regex.test(normalized) || normalized.includes(aliasNorm)) {
+        hasMatch = true;
         break;
       }
+
+      // 2. Check stem match for longer location names
+      if (aliasNorm.length >= 5) {
+        const aliasStem = stemUkrainian(aliasNorm);
+        if (aliasStem.length >= 4) {
+          if (wordStems.some(ws => ws === aliasStem || (ws.length >= 4 && ws.startsWith(aliasStem.slice(0, 5))))) {
+            hasMatch = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (hasMatch && !seenNames.has(loc.name)) {
+      matched.push(loc);
+      seenNames.add(loc.name);
     }
   }
 
