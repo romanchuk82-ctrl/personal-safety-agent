@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0d14",
+  themeColor: "#0c101a",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -31,13 +31,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="uk" className="dark">
+    <html lang="uk" className="dark bg-[#0c101a]">
       <head>
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-touch-fullscreen" content="yes" />
+        <meta name="format-detection" content="telephone=no" />
+        <meta name="theme-color" content="#0c101a" />
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
       </head>
-      <body className="bg-[#0a0d14] text-slate-100 min-h-screen antialiased selection:bg-blue-600 selection:text-white">
+      <body className="bg-[#070a10] text-slate-100 min-h-screen antialiased selection:bg-blue-600 selection:text-white">
         {children}
       </body>
     </html>

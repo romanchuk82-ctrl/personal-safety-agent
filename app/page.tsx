@@ -465,20 +465,20 @@ export default function HomePage() {
   );
 
   return (
-    <main className="min-h-screen bg-[#070a10] text-slate-100 pb-16 selection:bg-blue-500 selection:text-white font-sans antialiased">
+    <main className="min-h-screen bg-[#070a10] text-slate-100 main-safe selection:bg-blue-500 selection:text-white font-sans antialiased">
       {/* TOP HEADER */}
-      <header className="sticky top-0 z-40 bg-[#0c101a]/95 backdrop-blur-md border-b border-[#182234] px-4 py-3">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Shield className={'w-6 h-6 ' + (isRed ? 'text-red-500 animate-pulse' : isOrange ? 'text-amber-400' : isActive ? 'text-emerald-400' : 'text-slate-500')} />
-            <div>
-              <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
-                <span>ВАРТОВИЙ БЕЗПЕКИ</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-950 text-blue-400 border border-blue-800/60">
+      <header className="sticky top-0 z-40 bg-[#0c101a]/95 backdrop-blur-md border-b border-[#182234] header-safe shadow-sm">
+        <div className="max-w-md mx-auto flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <Shield className={'w-6 h-6 shrink-0 ' + (isRed ? 'text-red-500 animate-pulse' : isOrange ? 'text-amber-400' : isActive ? 'text-emerald-400' : 'text-slate-500')} />
+            <div className="min-w-0">
+              <h1 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5 truncate">
+                <span className="truncate">ВАРТОВИЙ БЕЗПЕКИ</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-950 text-blue-400 border border-blue-800/60 shrink-0">
                   AJAX-VOICE
                 </span>
               </h1>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-400 truncate">
                 {location ? location.name : 'Геолокація готова'}
               </p>
             </div>
@@ -487,7 +487,7 @@ export default function HomePage() {
           {/* DEDICATED SOUND TOGGLE */}
           <button
             onClick={() => handleToggleAudio()}
-            className={'px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ' + (
+            className={'shrink-0 px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ' + (
               audioEnabled
                 ? 'bg-blue-950/80 border-blue-500/50 text-blue-300 hover:bg-blue-900/80'
                 : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
@@ -496,13 +496,13 @@ export default function HomePage() {
           >
             {audioEnabled ? (
               <>
-                <Volume2 className="w-4 h-4 text-blue-400" />
-                <span>ГОЛОС УВІМКНЕНО</span>
+                <Volume2 className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>ГОЛОС: УВІМК</span>
               </>
             ) : (
               <>
-                <VolumeX className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-400">ТИХИЙ РЕЖИМ</span>
+                <VolumeX className="w-4 h-4 text-slate-500 shrink-0" />
+                <span>ТИХИЙ</span>
               </>
             )}
           </button>
@@ -937,7 +937,7 @@ export default function HomePage() {
 
       {/* EMERGENCY PUSH TEST COUNTDOWN MODAL */}
       {showTestModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
           <div className="bg-[#0f1522] border border-amber-500/60 rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl space-y-4">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
               <Bell className="w-7 h-7 animate-bounce" />
@@ -983,7 +983,7 @@ export default function HomePage() {
 
       {/* FLÜGER INFO MODAL */}
       {showFlugerModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 modal-safe">
           <div className="bg-[#0f1522] border border-cyan-500/40 rounded-3xl max-w-sm w-full p-5 text-slate-200 text-xs space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <h3 className="font-bold text-sm text-white">Методологія «ФЛЮГЕР» (КБ Технарі)</h3>
