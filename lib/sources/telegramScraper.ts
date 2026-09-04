@@ -1603,13 +1603,27 @@ export function getAllMonitoredSources(): ChannelConfig[] {
 }
 
 
+export interface ClusterSourceEntry {
+  username: string;
+  title: string;
+  weight: number;
+  timeIso: string;
+  timeFormatted: string;
+  text: string;
+  telegramUrl: string;
+  isOriginal: boolean;
+}
+
 export interface MessageCluster {
   id: string;
   representativeMessage: TelegramMessage;
   primaryChannel: string;
   primaryChannelTitle: string;
   sourceCount: number;
-  sources: { username: string; title: string; weight: number }[];
+  independentSourceCount: number;
+  repostCount: number;
+  sourceSummaryText: string;
+  sources: ClusterSourceEntry[];
   effectiveAuthority: number;
   earliestTimestamp: number;
   latestTimestamp: number;
@@ -1662,26 +1676,45 @@ export function clusterTelegramMessages(messages: TelegramMessage[], timeWindowM
       }
     }
 
+    const timeFormatted = new Date(msg.unixTimestamp).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const telegramUrl = 'https://t.me/' + msg.channel;
+
     if (matchedCluster) {
-      if (!matchedCluster.sources.some(s => s.username === msg.channel)) {
+      const isDuplicateChannel = matchedCluster.sources.some(s => s.username === msg.channel);
+      if (!isDuplicateChannel) {
         matchedCluster.sources.push({
           username: msg.channel,
           title: msg.channelTitle,
-          weight: msg.authorityWeight
+          weight: msg.authorityWeight,
+          timeIso: msg.timeIso,
+          timeFormatted,
+          text: msg.text,
+          telegramUrl,
+          isOriginal: false // subsequent sources in cluster are considered reposts/cross-shares
         });
         matchedCluster.sourceCount++;
+        matchedCluster.repostCount++;
       }
+
       if (msg.authorityWeight > matchedCluster.effectiveAuthority) {
         matchedCluster.representativeMessage = msg;
         matchedCluster.primaryChannel = msg.channel;
         matchedCluster.primaryChannelTitle = msg.channelTitle;
       }
+
       matchedCluster.effectiveAuthority = Math.min(
         1.0,
         Math.max(...matchedCluster.sources.map(s => s.weight)) + (Math.min(matchedCluster.sourceCount - 1, 4) * 0.015)
       );
       matchedCluster.earliestTimestamp = Math.min(matchedCluster.earliestTimestamp, msg.unixTimestamp);
       matchedCluster.latestTimestamp = Math.max(matchedCluster.latestTimestamp, msg.unixTimestamp);
+
+      // Honest source summary text
+      if (matchedCluster.repostCount > 0) {
+        matchedCluster.sourceSummaryText = `${matchedCluster.sourceCount} повідомлень (1 першоджерело + ${matchedCluster.repostCount} репост)`;
+      } else {
+        matchedCluster.sourceSummaryText = `1 незалежне джерело`;
+      }
     } else {
       clusters.push({
         id: 'cluster_' + msg.id,
@@ -1689,7 +1722,19 @@ export function clusterTelegramMessages(messages: TelegramMessage[], timeWindowM
         primaryChannel: msg.channel,
         primaryChannelTitle: msg.channelTitle,
         sourceCount: 1,
-        sources: [{ username: msg.channel, title: msg.channelTitle, weight: msg.authorityWeight }],
+        independentSourceCount: 1,
+        repostCount: 0,
+        sourceSummaryText: '1 джерело (первинне)',
+        sources: [{
+          username: msg.channel,
+          title: msg.channelTitle,
+          weight: msg.authorityWeight,
+          timeIso: msg.timeIso,
+          timeFormatted,
+          text: msg.text,
+          telegramUrl,
+          isOriginal: true
+        }],
         effectiveAuthority: msg.authorityWeight,
         earliestTimestamp: msg.unixTimestamp,
         latestTimestamp: msg.unixTimestamp,
