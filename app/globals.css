@@ -71,3 +71,24 @@ body {
 .radar-spinner {
   animation: radar-sweep 4s linear infinite;
 }
+
+/* Leaflet Map Styles & Touch Optimization */
+.leaflet-container {
+  background-color: #060911 !important;
+  font-family: inherit !important;
+  z-index: 10 !important;
+  border-radius: 1.5rem !important;
+}
+
+.leaflet-tile {
+  filter: brightness(0.92) contrast(1.08);
+}
+
+.leaflet-control-container .leaflet-control {
+  display: none !important;
+}
+
+.threat-marker-icon, .user-location-pin {
+  background: transparent !important;
+  border: none !important;
+}

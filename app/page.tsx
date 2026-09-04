@@ -1,6 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+
+const SafetyMap = dynamic(() => import('@/components/SafetyMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[320px] rounded-3xl bg-[#0a0f18] border border-[#1a2538] flex flex-col items-center justify-center gap-2 text-slate-400">
+      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <span className="text-xs font-mono">Завантаження інтерактивної карти...</span>
+    </div>
+  ),
+});
 import {
   Shield,
   ShieldAlert,
@@ -665,82 +676,19 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* FLÜGER RADAR DISPLAY (COMPACT) */}
+        {/* INTERACTIVE SAFETY MAP (Replacing Static Radar) */}
         {isActive && location && (
-          <div className="mb-4 bg-[#0a0f18] border border-[#1a2538] rounded-2xl p-4 shadow-xl">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <RadarIcon className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                  ТАКТИЧНИЙ РАДАР (15 / 30 / 45 КМ)
-                </span>
-              </div>
-              <span className="text-[11px] font-mono text-slate-400">
-                Цілей у радіусі: <strong className="text-white">{radarThreats.length}</strong>
-              </span>
-            </div>
-
-            {/* RADAR SVG SCOPE */}
-            <div className="relative w-full aspect-square max-w-[280px] mx-auto bg-[#05080f] rounded-full border border-cyan-500/30 shadow-inner flex items-center justify-center overflow-hidden my-2">
-              {/* Rings */}
-              <div className="absolute w-[92%] h-[92%] rounded-full border border-yellow-500/30 flex items-start justify-center">
-                <span className="text-[8px] font-mono text-yellow-500/70 bg-[#05080f]/90 px-1 rounded -translate-y-1.5">45 км</span>
-              </div>
-              <div className="absolute w-[62%] h-[62%] rounded-full border border-orange-500/40 flex items-start justify-center">
-                <span className="text-[8px] font-mono text-orange-400/80 bg-[#05080f]/90 px-1 rounded -translate-y-1.5">30 км</span>
-              </div>
-              <div className="absolute w-[32%] h-[32%] rounded-full border border-red-500/60 bg-red-950/10 flex items-start justify-center">
-                <span className="text-[8px] font-mono font-bold text-red-400 bg-[#05080f]/90 px-1 rounded -translate-y-1.5">15 км</span>
-              </div>
-
-              {/* Crosshair */}
-              <div className="absolute w-full h-[1px] bg-cyan-500/20" />
-              <div className="absolute h-full w-[1px] bg-cyan-500/20" />
-
-              {/* Cardinal marks */}
-              <span className="absolute top-1 text-[8px] font-bold text-cyan-400 font-mono">Пн</span>
-              <span className="absolute bottom-1 text-[8px] font-bold text-cyan-400 font-mono">Пд</span>
-              <span className="absolute left-1.5 text-[8px] font-bold text-cyan-400 font-mono">Зх</span>
-              <span className="absolute right-1.5 text-[8px] font-bold text-cyan-400 font-mono">Сх</span>
-
-              {/* Rotating Sweep Beam */}
-              <div className="absolute inset-0 rounded-full animate-radar-sweep pointer-events-none opacity-40 bg-[conic-gradient(from_0deg_at_50%_50%,rgba(6,182,212,0.4)_0deg,transparent_60deg,transparent_360deg)]" />
-
-              {/* Center User Pin */}
-              <div className="absolute z-20 flex flex-col items-center justify-center">
-                <div className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-lg animate-pulse" />
-                <span className="text-[7px] font-bold text-blue-300 font-mono mt-0.5 bg-[#070b14] px-1 rounded">ВИ</span>
-              </div>
-
-              {/* Threat Dots */}
-              {radarThreats.map((threat, idx) => {
-                const dist = threat.distanceKm || 20;
-                const bearing = threat.bearingDegrees !== undefined ? threat.bearingDegrees : (idx * 45);
-                const visualDistPercent = (Math.min(45, dist) / 45) * 44;
-                const rad = ((bearing - 90) * Math.PI) / 180;
-                const x = 50 + visualDistPercent * Math.cos(rad);
-                const y = 50 + visualDistPercent * Math.sin(rad);
-
-                const isDirectShelter = dist <= 15;
-                const isAlertZone = dist <= 30;
-
-                return (
-                  <button
-                    key={threat.id + '_' + idx}
-                    onClick={() => setSelectedThreat(threat)}
-                    className="absolute z-30 -translate-x-1/2 -translate-y-1/2 cursor-pointer focus:outline-none"
-                    style={{ left: `${x}%`, top: `${y}%` }}
-                  >
-                    <div className="relative flex items-center justify-center">
-                      <span className={'animate-ping absolute inline-flex h-3.5 w-3.5 rounded-full opacity-75 ' + (isDirectShelter ? 'bg-red-400' : isAlertZone ? 'bg-orange-400' : 'bg-yellow-400')} />
-                      <div className={'w-2.5 h-2.5 rounded-full flex items-center justify-center text-[6px] font-black ' + (isDirectShelter ? 'bg-red-600 text-white' : isAlertZone ? 'bg-orange-500 text-black' : 'bg-yellow-400 text-black')}>
-                        !
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="mb-4">
+            <SafetyMap
+              userLocation={location}
+              radiusKm={radiusKm}
+              threats={radarThreats}
+              selectedThreat={selectedThreat}
+              onSelectThreat={setSelectedThreat}
+              isActive={isActive}
+              isRed={isRed}
+              isOrange={isOrange}
+            />
           </div>
         )}
 
