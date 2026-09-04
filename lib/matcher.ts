@@ -155,31 +155,36 @@ export function evaluateLocalSecurity(
       const isDirect = dist <= (userRadiusKm + 2);
 
       if (isDirect) {
+        const isTacticalAlert = alert.alert_type === 'artillery_shelling' || alert.alert_type === 'urban_fights';
         threatEvents.push({
           id: `alert_in_ua_${alert.id}`,
           source: 'alerts.in.ua',
-          sourceTitle: `Офіційна тривога (${alert.location_type}: ${alert.location_title})`,
-          category: alert.alert_type === 'artillery_shelling' ? 'ARTILLERY' : 'GENERAL_AIR_RAID',
-          categoryNameUk: alert.alert_type === 'artillery_shelling' ? 'Артилерійський обстріл' : 'Повітряна тривога',
-          severity: alert.alert_type === 'artillery_shelling' ? 'CRITICAL' : 'HIGH',
+          sourceTitle: `Офіційне сповіщення (${alert.location_type}: ${alert.location_title})`,
+          category: isTacticalAlert ? 'ARTILLERY' : 'GENERAL_AIR_RAID',
+          categoryNameUk: isTacticalAlert ? 'Артилерійський обстріл / Загроза' : 'Загальна повітряна тривога',
+          severity: isTacticalAlert ? 'CRITICAL' : 'INFO',
           detectedLocation: alert.location_title,
           detectedOblast: alert.location_oblast,
           threatCoordinates: { lat: matchedLocation.lat, lng: matchedLocation.lng },
           distanceKm: dist,
           isWithinRadius: dist <= userRadiusKm,
           confidence: alert.location_type === 'hromada' || alert.location_type === 'city' ? 'HIGH' : 'MEDIUM',
-          confidenceReason: `Офіційний статус тривоги для ${alert.location_type} ${alert.location_title} (~${dist} км)`,
-          requiresImmediateShelter: alert.alert_type === 'artillery_shelling' || dist <= userRadiusKm,
-          rawText: `Офіційне оголошення небезпеки (${alert.alert_type}) для ${alert.location_title}. Початок: ${alert.started_at}`,
+          confidenceReason: isTacticalAlert 
+            ? `Офіційно підтверджено загрозу артобстрілу для ${alert.location_title} (~${dist} км)`
+            : `Загальна сирена тривоги для ${alert.location_title} (~${dist} км, фоновий статус)`,
+          requiresImmediateShelter: isTacticalAlert,
+          rawText: `Офіційне сповіщення (${alert.alert_type}) для ${alert.location_title}. Початок: ${alert.started_at}`,
           timestamp: alert.started_at,
-          voiceAlertText: `${userName}, увага. Офіційно оголошено тривогу для вашого району ${alert.location_title}. Рекомендується перейти в укриття.`
+          voiceAlertText: isTacticalAlert 
+            ? `${userName}, увага. Офіційно підтверджено загрозу артобстрілу поблизу ${alert.location_title}. Терміново в укриття!`
+            : `${userName}, увага. Оголошено загальну тривогу для сектору ${alert.location_title}.`
         });
       }
     }
   }
 
   // Deduplicate and prioritize threats
-  // Sort: CRITICAL -> HIGH -> MEDIUM, then closest distance, then newest
+  // Sort: CRITICAL -> HIGH -> MEDIUM -> INFO, then closest distance, then newest
   threatEvents.sort((a, b) => {
     const sevScore: Record<string, number> = { CRITICAL: 3, HIGH: 2, MEDIUM: 1, INFO: 0 };
     const scoreDiff = (sevScore[b.severity] || 0) - (sevScore[a.severity] || 0);
@@ -189,7 +194,13 @@ export function evaluateLocalSecurity(
     return distA - distB;
   });
 
-  const activeThreats = threatEvents.filter(t => t.category !== 'ALL_CLEAR' && (t.isWithinRadius || (t.distanceKm !== null && t.distanceKm <= 8)));
+  // Filter out non-tactical generic alerts and all-clear messages for active alarming
+  const activeThreats = threatEvents.filter(
+    t => t.category !== 'ALL_CLEAR' && 
+         t.category !== 'GENERAL_AIR_RAID' && 
+         (t.isWithinRadius || (t.distanceKm !== null && t.distanceKm <= 10))
+  );
+  
   const primaryThreat = activeThreats.length > 0 ? activeThreats[0] : null;
   const allClear = threatEvents.some(t => t.category === 'ALL_CLEAR');
 

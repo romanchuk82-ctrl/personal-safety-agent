@@ -23,7 +23,7 @@ import {
   Layers
 } from 'lucide-react';
 import { fetchActiveAlerts } from '@/lib/sources/alertsInUa';
-import { fetchAllTelegramFeeds } from '@/lib/sources/telegramScraper';
+import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent } from '@/lib/matcher';
 import { findNearestLocation } from '@/lib/gazetteer';
 
@@ -39,13 +39,24 @@ interface LocationState {
 const CITY_PRESETS = [
   { name: 'Запоріжжя (Центр)', lat: 47.8388, lng: 35.1396, oblast: 'Запорізька область' },
   { name: 'Запоріжжя (Шевченківський)', lat: 47.8500, lng: 35.2000, oblast: 'Запорізька область' },
-  { name: 'Запоріжжя (Хортицький/Бабурка)', lat: 47.8300, lng: 35.0500, oblast: 'Запорізька область' },
+  { name: 'Запоріжжя (Бабурка / Хортицький)', lat: 47.8300, lng: 35.0500, oblast: 'Запорізька область' },
   { name: 'Дніпро (Центр)', lat: 48.4647, lng: 35.0462, oblast: 'Дніпропетровська область' },
-  { name: 'Київ (Центр)', lat: 50.4501, lng: 30.5234, oblast: 'Київська область' },
-  { name: 'Київ (Оболонь)', lat: 50.5015, lng: 30.4981, oblast: 'Київська область' },
+  { name: 'Дніпро (Лівий берег / Калинова)', lat: 48.5100, lng: 35.0800, oblast: 'Дніпропетровська область' },
+  { name: 'Павлоград (Центр)', lat: 48.5167, lng: 35.8667, oblast: 'Дніпропетровська область' },
+  { name: 'Харків (Центр)', lat: 49.9935, lng: 36.2304, oblast: 'Харківська область' },
   { name: 'Харків (Салтівка)', lat: 50.0200, lng: 36.3400, oblast: 'Харківська область' },
   { name: 'Одеса (Центр)', lat: 46.4825, lng: 30.7233, oblast: 'Одеська область' },
+  { name: 'Одеса (Посьолок Котовського)', lat: 46.5700, lng: 30.7900, oblast: 'Одеська область' },
+  { name: 'Миколаїв (Центр)', lat: 46.9750, lng: 31.9946, oblast: 'Миколаївська область' },
+  { name: 'Миколаїв (Корабельний р-н)', lat: 46.8800, lng: 32.0100, oblast: 'Миколаївська область' },
+  { name: 'Суми (Центр)', lat: 50.9077, lng: 34.7981, oblast: 'Сумська область' },
+  { name: 'Чернігів (Центр)', lat: 51.4982, lng: 31.2893, oblast: 'Чернігівська область' },
+  { name: 'Чернігів (Масани / Подусівка)', lat: 51.5200, lng: 31.2600, oblast: 'Чернігівська область' },
+  { name: 'Полтава (Центр)', lat: 49.5883, lng: 34.5514, oblast: 'Полтавська область' },
+  { name: 'Бориспіль (Центр / Аеропорт)', lat: 50.3500, lng: 30.9500, oblast: 'Київська область' },
+  { name: 'Київ (Центр / Оболонь)', lat: 50.4501, lng: 30.5234, oblast: 'Київська область' },
 ];
+
 
 export default function HomePage() {
   const [isActive, setIsActive] = useState<boolean>(false);
@@ -63,6 +74,7 @@ export default function HomePage() {
   const [showEventLog, setShowEventLog] = useState<boolean>(true);
   const [pushSubscribed, setPushSubscribed] = useState<boolean>(false);
   const [pushStatusMessage, setPushStatusMessage] = useState<string>('');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [sessionId, setSessionId] = useState<string>('');
 
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -224,7 +236,7 @@ export default function HomePage() {
     try {
       const [alertsResult, telegramResult] = await Promise.all([
         fetchActiveAlerts(),
-        fetchAllTelegramFeeds()
+        fetchAllTelegramFeeds(loc.oblast, 24)
       ]);
 
       const evalResult = evaluateLocalSecurity(
@@ -716,49 +728,102 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* RESEARCH & TRANSPARENCY */}
+        {/* RESEARCH & TRANSPARENCY - 118 MONITORED RADARS & SOURCES */}
         <div className="bg-[#121722] border border-[#1e2638] rounded-2xl p-4 mb-4">
           <button
             onClick={() => setShowResearchInfo(!showResearchInfo)}
-            className="w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200"
+            className="w-full flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white"
           >
             <span className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-cyan-400" />
-              Джерела даних та дослідження «Віраж-Планшет»
+              <span>Мережа тактичного моніторингу ({MONITORED_CHANNELS.length} джерел + API)</span>
             </span>
             {showResearchInfo ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
 
           {showResearchInfo && (
             <div className="mt-3 pt-3 border-t border-[#1e2638] space-y-3 text-xs text-slate-300">
-              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                <p className="font-bold text-slate-200">🛰 Дослідження системи «Віраж-Планшет»:</p>
-                <p className="text-slate-400 text-[11px] leading-relaxed">
-                  «Віраж-Планшет» — закрита військова АСУ ППО ЗСУ без публічного API. Спроби несанкціонованого доступу заборонені.
-                  Personal Safety Agent використовує <strong>100% легальні верифіковані ретранслятори та радіолокаційні OSINT-джерела</strong> з точністю до мікрорайонів.
+              {/* TACTICAL FOCUS BANNER */}
+              <div className="bg-blue-950/40 border border-blue-600/40 rounded-xl p-3 space-y-1">
+                <p className="font-bold text-blue-200 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  Прямий тактичний фокус (Без хибних тривог)
+                </p>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Застосунок <strong>не реагує на звичайні загальні сирени по області</strong>, а вмикає звукове і голосове попередження <strong>виключно при наявності прямої тактичної загрози</strong> для вашого міста чи району: КАБи, ударні дрони Shahed, балістика, пуски ракет чи артобстріл.
                 </p>
               </div>
 
-              <div className="space-y-1.5 text-[11px]">
-                <p className="font-semibold text-slate-400">Статус підключених джерел:</p>
-                <div className="grid grid-cols-1 gap-1.5 font-mono">
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <span>1. alerts.in.ua API (Громади/Райони)</span>
-                    <span className="text-emerald-400">● LIVE</span>
-                  </div>
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <span>2. @kpszsu (Повітряні Сили ЗСУ)</span>
-                    <span className="text-emerald-400">● LIVE</span>
-                  </div>
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <span>3. @vanek_nikolaev (OSINT Радар)</span>
-                    <span className="text-emerald-400">● LIVE</span>
-                  </div>
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <span>4. @monitorwarr (Monitor)</span>
-                    <span className="text-emerald-400">● LIVE</span>
-                  </div>
+              {/* VIRAZH-PLANSHET OSINT NOTICE */}
+              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                <p className="font-bold text-slate-200">🛰 Дослідження системи «Віраж-Планшет»:</p>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  «Віраж-Планшет» — закрита військова АСУ ППО ЗСУ без публічного API. Наш агент агрегує <strong>100% легальні та верифіковані військові ретранслятори, радіолокаційні OSINT-джерела</strong> та офіційні канали з привʼязкою до мікрорайонів і векторів польоту.
+                </p>
+              </div>
+
+              {/* CATEGORY FILTER */}
+              <div>
+                <p className="text-[11px] font-semibold text-slate-400 mb-1.5">Фільтр джерел за напрямками:</p>
+                <div className="flex flex-wrap gap-1 text-[10px]">
+                  {[
+                    { id: 'all', label: `Всі (${MONITORED_CHANNELS.length})` },
+                    { id: 'military_official', label: 'ЗСУ & ППО' },
+                    { id: 'radar_national', label: 'Головні радари' },
+                    { id: 'tactical_south', label: 'Запоріжжя / Одеса / Миколаїв' },
+                    { id: 'tactical_east', label: 'Дніпро / Павлоград / Харків' },
+                    { id: 'tactical_north', label: 'Суми / Чернігів' },
+                    { id: 'tactical_center', label: 'Полтава / Бориспіль / Київ' },
+                    { id: 'strategic_launch', label: 'Пускові рубежі' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSourceFilter(tab.id)}
+                      className={`px-2 py-1 rounded-lg border transition-colors ${
+                        sourceFilter === tab.id
+                          ? 'bg-blue-600 border-blue-400 text-white font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              {/* CHANNELS LIST */}
+              <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {/* alerts.in.ua API */}
+                <div className="flex items-center justify-between p-2 rounded-xl bg-slate-900 border border-slate-800 text-[11px]">
+                  <div>
+                    <p className="font-semibold text-slate-200">alerts.in.ua API</p>
+                    <p className="text-[10px] text-slate-400">Офіційні тривоги громад & районів України</p>
+                  </div>
+                  <span className="text-emerald-400 font-mono text-[10px] font-bold">● LIVE API</span>
+                </div>
+
+                {/* Filtered Monitored Channels */}
+                {MONITORED_CHANNELS
+                  .filter((ch) => sourceFilter === 'all' || ch.category === sourceFilter)
+                  .map((ch, idx) => (
+                    <div
+                      key={ch.username}
+                      className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px]"
+                    >
+                      <div className="pr-2 truncate">
+                        <p className="font-semibold text-slate-200 truncate">
+                          {idx + 1}. {ch.title}
+                        </p>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          @{ch.username} • <span className="text-cyan-400">{ch.region}</span>
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-emerald-400 font-mono text-[10px] block">● АКТИВНИЙ</span>
+                        <span className="text-slate-400 text-[9px]">Вага: {ch.weight * 100}%</span>
+                      </div>
+                    </div>
+                  ))}
               </div>
             </div>
           )}

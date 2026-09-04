@@ -13,11 +13,13 @@ export interface ThreatClassification {
   category: ThreatCategory;
   categoryNameUk: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
+  isTacticalThreat: boolean; // true ONLY for KAB, Ballistics, Cruise missiles, Strike UAVs, Artillery, Explosions
   directionKeywords: string[];
   isAllClear: boolean;
   requiresImmediateShelter: boolean;
   rawKeywordsMatched: string[];
 }
+
 
 export function classifyThreat(text: string): ThreatClassification {
   const normalized = text.toLowerCase();
@@ -32,6 +34,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'ALL_CLEAR',
         categoryNameUk: 'Відбій / Дорозвідка',
         severity: 'INFO',
+        isTacticalThreat: false,
         directionKeywords: [],
         isAllClear: true,
         requiresImmediateShelter: false,
@@ -58,6 +61,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'KAB',
         categoryNameUk: 'Керована авіабомба (КАБ)',
         severity: 'CRITICAL',
+        isTacticalThreat: true,
         directionKeywords,
         isAllClear: false,
         requiresImmediateShelter: true,
@@ -75,6 +79,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'BALLISTIC',
         categoryNameUk: 'Балістична загроза / Швидкісна ціль',
         severity: 'CRITICAL',
+        isTacticalThreat: true,
         directionKeywords,
         isAllClear: false,
         requiresImmediateShelter: true,
@@ -92,6 +97,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'CRUISE_MISSILE',
         categoryNameUk: 'Крилата ракета',
         severity: 'CRITICAL',
+        isTacticalThreat: true,
         directionKeywords,
         isAllClear: false,
         requiresImmediateShelter: true,
@@ -109,6 +115,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'UAV_STRIKE',
         categoryNameUk: 'Ударний БпЛА (Шахед / Дрон)',
         severity: 'HIGH',
+        isTacticalThreat: true,
         directionKeywords,
         isAllClear: false,
         requiresImmediateShelter: true,
@@ -126,6 +133,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'EXPLOSION',
         categoryNameUk: 'Зафіксовано вибух / Гучно',
         severity: 'HIGH',
+        isTacticalThreat: true,
         directionKeywords,
         isAllClear: false,
         requiresImmediateShelter: true,
@@ -143,6 +151,7 @@ export function classifyThreat(text: string): ThreatClassification {
         category: 'ARTILLERY',
         categoryNameUk: 'Артилерійський обстріл / РСЗВ',
         severity: 'HIGH',
+        isTacticalThreat: true,
         directionKeywords,
         isAllClear: false,
         requiresImmediateShelter: true,
@@ -151,11 +160,12 @@ export function classifyThreat(text: string): ThreatClassification {
     }
   }
 
-  // 7. General alert fallback
+  // 7. General alert fallback (Non-tactical siren)
   return {
     category: 'GENERAL_AIR_RAID',
-    categoryNameUk: 'Повітряна тривога / Загроза',
-    severity: 'MEDIUM',
+    categoryNameUk: 'Загальна повітряна тривога',
+    severity: 'INFO',
+    isTacticalThreat: false,
     directionKeywords,
     isAllClear: false,
     requiresImmediateShelter: false,
