@@ -4,15 +4,15 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Personal Safety Agent",
   description: "Персональний мобільний агент попередження про локальну небезпеку в Україні",
-  manifest: "/manifest.json",
+  manifest: "./manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "SafetyAgent",
   },
   icons: {
-    icon: "/icons/icon-192x192.png",
-    apple: "/icons/icon-192x192.png",
+    icon: "./icons/icon-192x192.png",
+    apple: "./icons/icon-192x192.png",
   },
 };
 
@@ -38,7 +38,7 @@ export default function RootLayout({
         <meta name="apple-touch-fullscreen" content="yes" />
         <meta name="format-detection" content="telephone=no" />
         <meta name="theme-color" content="#0c101a" />
-        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        <link rel="apple-touch-icon" href="./icons/icon-192x192.png" />
       </head>
       <body className="bg-[#070a10] text-slate-100 min-h-screen antialiased selection:bg-blue-600 selection:text-white">
         {children}
