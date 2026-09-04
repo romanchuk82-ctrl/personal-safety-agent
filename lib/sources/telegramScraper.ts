@@ -1463,6 +1463,18 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)));
 }
 
+export interface ChannelIngestStatus {
+  channel: string;
+  title: string;
+  ok: boolean;
+  count: number;
+  lastMessageText?: string;
+  lastMessageTimeIso?: string;
+  lastMessageId?: string;
+  lastCheckTimestamp: number;
+  error?: string;
+}
+
 export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ messages: TelegramMessage[]; error?: string }> {
   const now = Date.now();
   const cached = telegramCache[channel.username];
@@ -1497,53 +1509,48 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
         const html = await res.text();
         const messages: TelegramMessage[] = [];
 
-        const msgRegex = /<div class="tgme_widget_message_wrap[\s\S]*?<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>[\s\S]*?<time datetime="([^"]+)"/g;
-        let match;
+        // Split by Telegram message wrapper blocks for rock-solid parsing
+        const blocks = html.split(/<div class="tgme_widget_message_wrap/i);
 
-        while ((match = msgRegex.exec(html)) !== null) {
-          const rawText = match[1]
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<[^>]+>/g, '')
-            .trim();
-          const decodedText = decodeHtmlEntities(rawText);
-          const timeIso = match[2];
-          const unixTimestamp = new Date(timeIso).getTime();
+        for (let i = 1; i < blocks.length; i++) {
+          const block = blocks[i];
+          const textMatch = block.match(/<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/i);
+          const timeMatch = block.match(/<time datetime="([^"]+)"/i);
 
-          const id = channel.username + '_' + unixTimestamp + '_' + decodedText.slice(0, 15).replace(/\s+/g, '_');
+          if (textMatch) {
+            const rawText = textMatch[1]
+              .replace(/<tg-emoji[^>]*>([\s\S]*?)<\/tg-emoji>/gi, '$1')
+              .replace(/<br\s*\/?>/gi, '\n')
+              .replace(/<[^>]+>/g, '')
+              .trim();
 
-          if (decodedText.length > 3) {
-            messages.push({
-              id,
-              channel: channel.username,
-              channelTitle: channel.title,
-              authorityWeight: channel.weight,
-              text: decodedText,
-              timeIso,
-              unixTimestamp: isNaN(unixTimestamp) ? Date.now() : unixTimestamp
-            });
-          }
-        }
+            const decodedText = decodeHtmlEntities(rawText);
+            const timeIso = timeMatch ? timeMatch[1] : new Date().toISOString();
+            const unixTimestamp = new Date(timeIso).getTime();
 
-        if (messages.length === 0 && html.length > 100) {
-          const lines = html.split('\n').filter(l => l.trim().length > 10 && !l.startsWith('Title:') && !l.startsWith('URL:'));
-          lines.slice(-10).forEach((line, i) => {
-            const clean = line.replace(/^[*\s#->]+/, '').trim();
-            if (clean.length > 5) {
+            // Ignore scripts or empty noise
+            if (
+              decodedText.length > 3 &&
+              !decodedText.includes('document.body') &&
+              !decodedText.includes('no_transition') &&
+              !decodedText.startsWith('<script')
+            ) {
+              const id = channel.username + '_' + (isNaN(unixTimestamp) ? now : unixTimestamp) + '_' + decodedText.slice(0, 15).replace(/\s+/g, '_');
               messages.push({
-                id: channel.username + '_' + now + '_' + i,
+                id,
                 channel: channel.username,
                 channelTitle: channel.title,
                 authorityWeight: channel.weight,
-                text: clean,
-                timeIso: new Date().toISOString(),
-                unixTimestamp: now - (i * 60000)
+                text: decodedText,
+                timeIso,
+                unixTimestamp: isNaN(unixTimestamp) ? now : unixTimestamp
               });
             }
-          });
+          }
         }
 
         if (messages.length > 0) {
-          const recent = messages.slice(-15);
+          const recent = messages.slice(-20);
           telegramCache[channel.username] = {
             messages: recent,
             timestamp: now
@@ -1562,11 +1569,12 @@ export async function fetchChannelMessages(channel: ChannelConfig): Promise<{ me
 
 export async function fetchAllTelegramFeeds(
   userOblast?: string,
-  maxParallel: number = 32,
+  maxParallel: number = 36,
   customChannels: ChannelConfig[] = []
-): Promise<{ messages: TelegramMessage[]; sourceStatus: Record<string, { ok: boolean; count: number; error?: string }> }> {
+): Promise<{ messages: TelegramMessage[]; sourceStatus: Record<string, ChannelIngestStatus> }> {
   const allMessages: TelegramMessage[] = [];
-  const sourceStatus: Record<string, { ok: boolean; count: number; error?: string }> = {};
+  const sourceStatus: Record<string, ChannelIngestStatus> = {};
+  const now = Date.now();
 
   const channelsToQuery = getPrioritizedChannels(userOblast, customChannels).slice(0, maxParallel);
 
@@ -1579,15 +1587,25 @@ export async function fetchAllTelegramFeeds(
     if (res.status === 'fulfilled') {
       const { messages, error } = res.value;
       allMessages.push(...messages);
+      const latestMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
       sourceStatus[ch.username] = {
+        channel: ch.username,
+        title: ch.title,
         ok: messages.length > 0,
         count: messages.length,
+        lastMessageText: latestMsg?.text,
+        lastMessageTimeIso: latestMsg?.timeIso,
+        lastMessageId: latestMsg?.id,
+        lastCheckTimestamp: now,
         error
       };
     } else {
       sourceStatus[ch.username] = {
+        channel: ch.username,
+        title: ch.title,
         ok: false,
         count: 0,
+        lastCheckTimestamp: now,
         error: res.reason?.message || 'Rejected'
       };
     }

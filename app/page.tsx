@@ -52,8 +52,8 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert } from '@/lib/sources/alertsInUa';
-import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig } from '@/lib/sources/telegramScraper';
-import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState } from '@/lib/matcher';
+import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus } from '@/lib/sources/telegramScraper';
+import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
 import { unlockAudioAndSpeech, speakUkrainian, stopAllAudio } from '@/lib/soundService';
 import {
@@ -105,6 +105,7 @@ export default function HomePage() {
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [officialAlerts, setOfficialAlerts] = useState<RawAlert[]>([]);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
+  const [sourceStatuses, setSourceStatuses] = useState<Record<string, ChannelIngestStatus>>({});
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
   
@@ -117,6 +118,7 @@ export default function HomePage() {
   const [showTestModal, setShowTestModal] = useState<boolean>(false);
   const [testCountdown, setTestCountdown] = useState<number | null>(null);
   const [testCompleted, setTestCompleted] = useState<boolean>(false);
+  const [showRejectedModal, setShowRejectedModal] = useState<boolean>(false);
 
   // Collapsible Advanced Settings
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
@@ -294,6 +296,7 @@ export default function HomePage() {
       setSecondsSinceCheck(0);
 
       const statusMap = tgRes.sourceStatus || {};
+      setSourceStatuses(statusMap);
       setSourcesHealth({
         telegramSourcesTotal: Object.keys(statusMap).length,
         telegramOkCount: Object.values(statusMap).filter((s) => s.ok).length,
@@ -597,7 +600,7 @@ export default function HomePage() {
   const isLocationUnreliable = trustedLocation?.confidenceState === 'UNRELIABLE';
 
   const radarThreats = (evaluation?.threatEvents || []).filter(
-    (t) => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && t.distanceKm !== null && t.distanceKm <= 45
+    (t) => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.distanceKm === null || t.distanceKm <= 75)
   );
 
   // Gazetteer search filter for location modal
@@ -818,7 +821,7 @@ export default function HomePage() {
               ? evaluation?.stateDescriptionUk || 'Ціль спостерігається в області / коридорі підльоту. Загрози для вашого мікрорайону наразі немає.'
               : isDegraded
               ? 'Дані застаріли або відсутній зв’язок із джерелами. Перевірте підключення до інтернету.'
-              : 'Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор у реальному часі.'}
+              : evaluation?.stateDescriptionUk || 'Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор у реальному часі.'}
           </p>
 
           {/* TELEMETRY METRICS */}
@@ -941,6 +944,87 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* ACTIVE THREATS & OBSERVATIONS LIST */}
+        {radarThreats.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-blue-400" />
+                <span>Виявлені цілі та спостереження ({radarThreats.length})</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">Фільтр: до 75 км</span>
+            </div>
+
+            <div className="space-y-2">
+              {radarThreats.map((threat) => {
+                const isDirectThreat = threat.eventType === 'CONFIRMED_THREAT' || (threat.distanceKm !== null && threat.distanceKm <= radiusKm);
+                const isSelected = selectedThreat?.id === threat.id;
+
+                return (
+                  <div
+                    key={threat.id}
+                    onClick={() => setSelectedThreat(isSelected ? null : threat)}
+                    className={'p-3 rounded-2xl border transition-all cursor-pointer shadow-md ' + (
+                      isSelected
+                        ? isDirectThreat
+                          ? 'bg-red-950/90 border-red-500 ring-1 ring-red-400'
+                          : 'bg-amber-950/90 border-amber-500 ring-1 ring-amber-400'
+                        : isDirectThreat
+                        ? 'bg-[#180808] hover:bg-[#220c0c] border-red-900/80 text-red-100'
+                        : 'bg-[#141208] hover:bg-[#1f1b0c] border-amber-900/60 text-amber-100'
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={'text-xs p-1.5 rounded-xl shrink-0 ' + (
+                          isDirectThreat ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                        )}>
+                          {isDirectThreat ? '🔴' : '👁️'}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-xs text-white truncate">
+                              {threat.categoryNameUk}
+                            </span>
+                            <span className={'text-[9px] font-mono px-1.5 py-0.2 rounded border ' + (
+                              isDirectThreat
+                                ? 'bg-red-950 text-red-300 border-red-800'
+                                : 'bg-amber-950 text-amber-300 border-amber-800'
+                            )}>
+                              {isDirectThreat ? 'ПРЯМА ЗАГРОЗА' : 'СПОСТЕРЕЖЕННЯ'}
+                            </span>
+                            {threat.bearingSectorUk && (
+                              <span className="text-[9px] font-mono text-slate-400">
+                                • {threat.bearingSectorUk}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                            📍 <strong>{threat.detectedLocation}</strong> ({threat.honestDistanceText})
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="text-[10px] font-mono text-slate-400 block">
+                          {threat.timestamp ? new Date(threat.timestamp).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                        <span className="text-[9px] text-slate-500 truncate block max-w-[90px]">
+                          {threat.sourceTitle}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-[11px] bg-black/40 p-2 rounded-xl text-slate-300 font-mono line-clamp-2 border border-white/5">
+                      "{threat.rawText}"
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* SELECTED THREAT CARD */}
         {selectedThreat && (
           <div className="mb-4 bg-red-950/90 border border-red-500 rounded-2xl p-4 shadow-xl">
@@ -982,6 +1066,68 @@ export default function HomePage() {
 
           {showAdvanced && (
             <div className="mt-4 pt-4 border-t border-slate-800 space-y-4 text-xs">
+              {/* LIVE DIAGNOSTICS & TELEMETRY */}
+              <div className="p-3 bg-[#0d1422] rounded-xl border border-blue-900/60 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-blue-300 font-bold flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Діагностика парсингу та Ingestion</span>
+                  </span>
+                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
+                    LIVE
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-mono">📡 ОСТАННЄ TG ПОВІДОМЛЕННЯ</span>
+                    <span className="font-mono font-bold text-white">
+                      {evaluation?.lastTelegramMessageIso
+                        ? new Date(evaluation.lastTelegramMessageIso).toLocaleTimeString('uk-UA')
+                        : 'Очікування даних'}
+                    </span>
+                  </div>
+                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-mono">🔴 ПРЯМІ ЗАГРОЗИ В СЕКТОРІ</span>
+                    <span className="font-mono font-bold text-red-400">
+                      {evaluation?.threatsCount ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-mono">👁️ СПОСТЕРЕЖЕННЯ В РЕГІОНІ</span>
+                    <span className="font-mono font-bold text-amber-300">
+                      {(evaluation?.observationsCount ?? 0) + (evaluation?.outsideZoneObservationsCount ?? 0)}
+                    </span>
+                  </div>
+                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-mono">🚫 ВІДХИЛЕНО ПОВІДОМЛЕНЬ</span>
+                    <span className="font-mono font-bold text-slate-300">
+                      {evaluation?.rejectedCount ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-mono">❓ НЕРОЗПІЗНАНА ГЕОГРАФІЯ</span>
+                    <span className="font-mono font-bold text-amber-400">
+                      {evaluation?.geoUnresolvedCount ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
+                    <span className="text-[9px] text-slate-400 block font-mono">📡 АКТИВНІ КАНАЛИ</span>
+                    <span className="font-mono font-bold text-emerald-400">
+                      {sourcesHealth?.telegramOkCount ?? 0} / {sourcesHealth?.telegramSourcesTotal ?? allSources.length}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowRejectedModal(true)}
+                  className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                >
+                  <Search className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Переглянути відхилені повідомлення ({evaluation?.rejectedMessagesLog?.length ?? 0})</span>
+                </button>
+              </div>
+
               {/* AUDIO & VOICE DIAGNOSTICS */}
               <div className="p-3 bg-[#101726] rounded-xl border border-blue-900/60 space-y-2">
                 <div className="flex items-center justify-between">
@@ -1125,13 +1271,32 @@ export default function HomePage() {
                     Про «Флюгер»
                   </button>
                 </div>
-                <div className="max-h-32 overflow-y-auto space-y-1 text-[11px] pr-1">
-                  {allSources.slice(0, 25).map((s) => (
-                    <div key={s.username} className="flex items-center justify-between p-1.5 rounded bg-[#070a10] border border-slate-800">
-                      <span className="text-slate-300 truncate">@{s.username}</span>
-                      <span className="text-[9px] font-mono text-emerald-400">АКТИВНИЙ</span>
-                    </div>
-                  ))}
+                <div className="max-h-48 overflow-y-auto space-y-1 text-[11px] pr-1">
+                  {allSources.slice(0, 35).map((s) => {
+                    const st = sourceStatuses[s.username];
+                    const isOk = st ? st.ok : true;
+                    return (
+                      <div key={s.username} className="flex items-center justify-between p-2 rounded bg-[#070a10] border border-slate-800">
+                        <div className="min-w-0 pr-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className={'w-2 h-2 rounded-full shrink-0 ' + (isOk ? 'bg-emerald-400' : 'bg-red-500')} />
+                            <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 truncate">{s.title}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className={'text-[9px] font-mono ' + (isOk ? 'text-emerald-400' : 'text-red-400')}>
+                            {isOk ? 'АКТИВНИЙ' : 'ПОМИЛКА'}
+                          </span>
+                          {st?.lastMessageTimeIso && (
+                            <span className="text-[9px] font-mono text-slate-500 block">
+                              {new Date(st.lastMessageTimeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1274,6 +1439,74 @@ export default function HomePage() {
             <button onClick={() => setShowFlugerModal(false)} className="w-full py-2 bg-blue-600 text-white font-bold rounded-xl">
               Зрозуміло
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* REJECTED MESSAGES AUDIT MODAL */}
+      {showRejectedModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 modal-safe">
+          <div className="bg-[#0f1522] border border-slate-700 rounded-3xl max-w-lg w-full p-5 text-slate-200 text-xs space-y-3.5 shadow-2xl animate-fadeIn max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-bold text-sm text-white">Журнал відхилених повідомлень</h3>
+              </div>
+              <button onClick={() => setShowRejectedModal(false)} className="text-slate-400 hover:text-white text-base font-bold">✕</button>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed shrink-0">
+              Повідомлення, отримані з Telegram-каналів, які система проаналізувала та прозоро відхилила з вказанням причини.
+            </p>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[160px]">
+              {(!evaluation?.rejectedMessagesLog || evaluation.rejectedMessagesLog.length === 0) ? (
+                <div className="text-center py-8 text-slate-500 font-mono text-xs">
+                  Відхилених повідомлень наразі немає.
+                </div>
+              ) : (
+                evaluation.rejectedMessagesLog.map((item) => {
+                  let reasonBadgeClass = 'bg-slate-900 text-slate-300 border-slate-700';
+                  if (item.reason === 'no_geo') reasonBadgeClass = 'bg-amber-950 text-amber-300 border-amber-800';
+                  else if (item.reason === 'outside_range') reasonBadgeClass = 'bg-blue-950 text-blue-300 border-blue-800';
+                  else if (item.reason === 'duplicate' || item.reason === 'stale') reasonBadgeClass = 'bg-slate-900 text-slate-400 border-slate-800';
+                  else if (item.reason === 'all_clear') reasonBadgeClass = 'bg-emerald-950 text-emerald-300 border-emerald-800';
+
+                  return (
+                    <div key={item.id} className="p-3 rounded-xl bg-[#080d16] border border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-200 text-xs">@{item.channel}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={'text-[9px] font-mono px-2 py-0.5 rounded border font-semibold ' + reasonBadgeClass}>
+                            {item.reasonUk}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {item.timeIso ? new Date(item.timeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : ''}
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] font-mono text-slate-300 bg-black/50 p-2 rounded-lg border border-slate-800/80 leading-relaxed">
+                        "{item.text}"
+                      </p>
+
+                      <p className="text-[10px] text-slate-400 italic">
+                        Причина: {item.detailsUk}
+                      </p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 shrink-0">
+              <button
+                onClick={() => setShowRejectedModal(false)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs"
+              >
+                Закрити
+              </button>
+            </div>
           </div>
         </div>
       )}

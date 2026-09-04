@@ -380,18 +380,40 @@ export default function SafetyMap({
     const activeThreats = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
 
     activeThreats.forEach((threat) => {
-      const isCritical = threat.severity === 'CRITICAL' || (threat.distanceKm !== null && threat.distanceKm <= 15);
-      const isAlert = threat.severity === 'HIGH' || (threat.distanceKm !== null && threat.distanceKm <= 30);
-      const markerBg = isCritical ? 'bg-red-600' : isAlert ? 'bg-amber-500' : 'bg-yellow-400';
-      const markerText = isCritical ? '🚨' : isAlert ? '⚠️' : '⚡';
+      const isConfirmed = threat.eventType === 'CONFIRMED_THREAT' || (threat.isWithinRadius && threat.requiresImmediateShelter);
+      const isSurrounding = threat.isSurroundingObservation || (!threat.isWithinRadius && threat.distanceKm !== null && threat.distanceKm > radiusKm);
+      const isCritical = threat.severity === 'CRITICAL' || (threat.distanceKm !== null && threat.distanceKm <= 15 && isConfirmed);
+      const isAlert = isConfirmed && (threat.severity === 'HIGH' || (threat.distanceKm !== null && threat.distanceKm <= 30));
 
-      // CASE A: EXACT COORDINATES ARE KNOWN
+      let markerBg = 'bg-amber-500';
+      let markerText = '👁️';
+      let haloClass = 'bg-amber-500/20';
+      let lineColor = '#eab308';
+
+      if (isCritical) {
+        markerBg = 'bg-red-600';
+        markerText = '🚨';
+        haloClass = 'bg-red-500/40 animate-ping';
+        lineColor = '#ef4444';
+      } else if (isAlert) {
+        markerBg = 'bg-amber-500';
+        markerText = '⚠️';
+        haloClass = 'bg-amber-500/30 animate-pulse';
+        lineColor = '#f59e0b';
+      } else if (isSurrounding) {
+        markerBg = 'bg-slate-900 border border-yellow-400/90 text-yellow-300';
+        markerText = '👁️';
+        haloClass = 'bg-yellow-500/20';
+        lineColor = '#64748b';
+      }
+
+      // CASE A: EXACT / APPROXIMATE TOWN COORDINATES ARE KNOWN
       if (threat.threatCoordinates && threat.threatCoordinates.lat && threat.threatCoordinates.lng) {
         const threatLatLng: [number, number] = [threat.threatCoordinates.lat, threat.threatCoordinates.lng];
 
         const threatHtml = `
           <div class="relative flex items-center justify-center cursor-pointer" style="width: 36px; height: 36px;">
-            <span class="absolute inline-flex h-8 w-8 rounded-full ${isCritical ? 'bg-red-500/40 animate-ping' : 'bg-amber-500/30 animate-pulse'}"></span>
+            <span class="absolute inline-flex h-8 w-8 rounded-full ${haloClass}"></span>
             <div class="w-6 h-6 rounded-full ${markerBg} text-white shadow-xl border-2 border-white/90 flex items-center justify-center text-[10px] font-black transform active:scale-90 transition-transform">
               <span>${markerText}</span>
             </div>
@@ -405,13 +427,13 @@ export default function SafetyMap({
           iconAnchor: [18, 18],
         });
 
-        const marker = L.marker(threatLatLng, { icon: threatIcon, zIndexOffset: 900 });
+        const marker = L.marker(threatLatLng, { icon: threatIcon, zIndexOffset: isCritical ? 950 : 900 });
 
         const line = L.polyline([userLatLng, threatLatLng], {
-          color: isCritical ? '#ef4444' : '#f59e0b',
-          weight: 1.5,
-          dashArray: '4, 6',
-          opacity: 0.6,
+          color: lineColor,
+          weight: isCritical ? 2 : 1.5,
+          dashArray: isSurrounding ? '3, 6' : '4, 6',
+          opacity: isSurrounding ? 0.35 : 0.6,
         });
 
         marker.on('click', () => {
@@ -428,10 +450,10 @@ export default function SafetyMap({
         const sectorCoords = getSectorCoordinates(userLocation.lat, userLocation.lng, radiusMeters, threat.bearingDegrees, 22.5);
 
         const polygon = L.polygon(sectorCoords, {
-          color: isCritical ? '#ef4444' : '#f59e0b',
+          color: lineColor,
           weight: 1.5,
-          fillColor: isCritical ? '#ef4444' : '#f59e0b',
-          fillOpacity: isCritical ? 0.25 : 0.15,
+          fillColor: isCritical ? '#ef4444' : isAlert ? '#f59e0b' : '#eab308',
+          fillOpacity: isCritical ? 0.25 : isAlert ? 0.15 : 0.08,
           dashArray: '4, 4',
         });
 
@@ -479,6 +501,8 @@ export default function SafetyMap({
     mapInstanceRef.current.zoomOut();
   }, []);
 
+  const activeConfirmedThreatsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'CONFIRMED_THREAT' || (t.isWithinRadius && t.requiresImmediateShelter))).length;
+  const activeObservationsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'OBSERVATION' || !t.isWithinRadius)).length;
   const activeThreatsCount = threats.filter(t => (t.status === 'active' || !t.status) && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID').length;
   const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
 
@@ -507,46 +531,52 @@ export default function SafetyMap({
         </div>
 
         <div className="flex items-center gap-1.5 pointer-events-auto shrink-0">
-          {activeThreatsCount > 0 && (
+          {activeConfirmedThreatsCount > 0 && (
             <div className="bg-red-950/95 backdrop-blur-md px-2.5 py-1 rounded-full border border-red-500/80 shadow-lg flex items-center gap-1.5 text-red-300 text-[10px] font-bold animate-pulse">
               <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-              <span>{activeThreatsCount} {activeThreatsCount === 1 ? 'ціль' : 'цілі'}</span>
+              <span>{activeConfirmedThreatsCount} {activeConfirmedThreatsCount === 1 ? 'загроза' : 'загрози'}</span>
             </div>
           )}
 
-          {activeOfficialAlertsCount > 0 && (
+          {activeObservationsCount > 0 && (
+            <div className="bg-amber-950/90 backdrop-blur-md px-2 py-1 rounded-full border border-amber-600/70 shadow-md flex items-center gap-1 text-amber-300 text-[10px] font-bold">
+              <span>👁️ {activeObservationsCount}</span>
+            </div>
+          )}
+
+          {showOfficialAlerts && activeOfficialAlertsCount > 0 && (
             <div className="bg-rose-950/85 backdrop-blur-md px-2 py-1 rounded-full border border-rose-800/60 shadow-md flex items-center gap-1 text-rose-300 text-[10px] font-bold">
-              <Bell className="w-3 h-3 text-rose-400" />
-              <span>{activeOfficialAlertsCount} тривог</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+              <span>{activeOfficialAlertsCount} обл</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* LEAFLET MAP CANVAS */}
+      {/* MAP CONTAINER FOR LEAFLET */}
       <div
         ref={mapContainerRef}
-        className="w-full h-[320px] sm:h-[360px] bg-[#060911] cursor-grab active:cursor-grabbing touch-pan-x touch-pan-y"
-        style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+        className="w-full h-[340px] z-0 focus:outline-none"
+        style={{ minHeight: '340px' }}
       />
 
-      {/* FLOATING MAP CONTROLS */}
-      <div className="absolute bottom-3 right-3 z-[400] flex flex-col gap-1.5 pointer-events-auto">
+      {/* MAP CONTROLS (RIGHT SIDE) */}
+      <div className="absolute right-3 bottom-3 z-[400] flex flex-col gap-1.5">
         <button
           onClick={() => setShowOfficialAlerts(!showOfficialAlerts)}
-          className={'w-9 h-9 rounded-xl border shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95 ' + (
+          className={'w-9 h-9 rounded-xl border shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95 text-xs ' + (
             showOfficialAlerts
-              ? 'bg-rose-950/90 hover:bg-rose-900 border-rose-600/70 text-rose-300'
-              : 'bg-[#0e1626]/95 hover:bg-slate-800 border-slate-700/80 text-slate-400'
+              ? 'bg-rose-950/90 border-rose-600 text-rose-300 shadow-rose-950/40'
+              : 'bg-[#0e1626]/95 border-slate-700/80 text-slate-400 hover:text-slate-200'
           )}
-          title={showOfficialAlerts ? 'Приховати шар офіційних тривог' : 'Показати шар офіційних тривог'}
+          title="Шар офіційних тривог"
         >
           <Layers className="w-4 h-4" />
         </button>
 
         <button
           onClick={handleRecenter}
-          className="w-9 h-9 rounded-xl bg-[#0e1626]/95 hover:bg-blue-900/80 text-blue-400 hover:text-white border border-slate-700/80 shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95"
+          className="w-9 h-9 rounded-xl bg-[#0e1626]/95 hover:bg-slate-800 text-blue-400 border border-slate-700/80 shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95"
           title="Повернутися до моєї позиції"
         >
           <Crosshair className="w-4 h-4" />
@@ -580,16 +610,22 @@ export default function SafetyMap({
             <span className="w-2.5 h-0.5 border-t-2 border-dashed border-blue-400 inline-block"></span>
             <span>Зона {radiusKm} км</span>
           </span>
-          {activeThreatsCount > 0 && (
+          {activeConfirmedThreatsCount > 0 && (
             <span className="flex items-center gap-1 text-red-400 font-bold animate-pulse">
               <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
-              <span>Локальна ціль</span>
+              <span>Загроза</span>
+            </span>
+          )}
+          {activeObservationsCount > 0 && (
+            <span className="flex items-center gap-1 text-amber-400 font-bold">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+              <span>Спостереження</span>
             </span>
           )}
           {showOfficialAlerts && activeOfficialAlertsCount > 0 && (
             <span className="flex items-center gap-1 text-rose-400">
               <span className="w-2 h-2 border border-dashed border-rose-500 bg-rose-500/20 rounded-xs inline-block"></span>
-              <span>Офіційна тривога</span>
+              <span>Тривога</span>
             </span>
           )}
         </div>

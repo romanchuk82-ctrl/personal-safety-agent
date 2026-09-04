@@ -6,6 +6,7 @@ import { TelegramMessage, clusterTelegramMessages, MessageCluster, ClusterSource
 export type SecurityState = 'GREEN' | 'ORANGE' | 'RED' | 'DEGRADED';
 export type SpatialPrecision = 'EXACT_MICRODISTRICT' | 'CITY_AREA' | 'RAION_SECTOR' | 'REGIONAL_CORRIDOR';
 export type EventStatus = 'active' | 'stale' | 'cleared';
+export type ThreatEventType = 'CONFIRMED_THREAT' | 'OBSERVATION';
 
 export interface ThreatEvent {
   id: string;
@@ -14,6 +15,7 @@ export interface ThreatEvent {
   category: ThreatCategory;
   categoryNameUk: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
+  eventType: ThreatEventType; // 'CONFIRMED_THREAT' (direct local threat) vs 'OBSERVATION' (early / surrounding report)
 
   // Strict Event Lifecycle
   createdAt: string;       // ISO timestamp of first message
@@ -28,10 +30,12 @@ export interface ThreatEvent {
   detectedOblast: string;
   spatialPrecision: SpatialPrecision;
   spatialPrecisionUk: string; // "Точна (мікрорайон)" | "Міська зона" | "Районний сектор" | "Регіональний коридор"
+  isApproximateLocation: boolean;
   threatCoordinates?: { lat: number; lng: number };
   distanceKm: number | null;
   honestDistanceText: string;
   isWithinRadius: boolean;
+  isSurroundingObservation: boolean; // true if outside monitoring radius but within surrounding range (30-75 km)
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   confidenceUk: string; // "Висока" | "Середня" | "Низька"
   confidenceReason: string;
@@ -49,6 +53,26 @@ export interface ThreatEvent {
   bearingSectorUk?: string;
 }
 
+export type RejectedReason =
+  | 'no_geo'             // Геолокація не розпізнана в тексті
+  | 'outside_range'      // Поза зоною моніторингу та флюгера (> 75 км)
+  | 'duplicate'          // Дублікат / репост у межах кластера
+  | 'stale'              // Застаріле повідомлення (> 30 хв)
+  | 'low_confidence'     // Низька достовірність
+  | 'unsupported_type'   // Інформаційний шум / не є тактичною ціллю
+  | 'all_clear';         // Сигнал відбою
+
+export interface RejectedMessageItem {
+  id: string;
+  channel: string;
+  channelTitle: string;
+  text: string;
+  timeIso: string;
+  reason: RejectedReason;
+  reasonUk: string;
+  detailsUk: string;
+}
+
 export interface SecurityEvaluationResult {
   overallState: SecurityState;
   stateBadgeUk: string;
@@ -57,11 +81,21 @@ export interface SecurityEvaluationResult {
   hasAttentionWarning: boolean; // true if overallState === 'ORANGE'
   primaryThreat: ThreatEvent | null;
   threatEvents: ThreatEvent[];
+  observationsList: ThreatEvent[];
+  confirmedThreatsList: ThreatEvent[];
+  outsideZoneObservations: ThreatEvent[];
   allClearDetected: boolean;
   userNearestKnownLocation: string;
   userOblast: string;
   totalSourcesEvaluated: number;
   totalClustersAnalyzed: number;
+  observationsCount: number;
+  threatsCount: number;
+  outsideZoneObservationsCount: number;
+  rejectedCount: number;
+  geoUnresolvedCount: number;
+  lastTelegramMessageIso: string | null;
+  rejectedMessagesLog: RejectedMessageItem[];
   evaluationTimestamp: string;
   isDataStale: boolean;
 }
@@ -76,16 +110,46 @@ export function evaluateLocalSecurity(
   lastIngestTimeMs?: number
 ): SecurityEvaluationResult {
   const threatEvents: ThreatEvent[] = [];
+  const rejectedMessagesLog: RejectedMessageItem[] = [];
   const nearestUserLoc = findNearestLocation(userLat, userLng);
   const now = Date.now();
   
   // Maximum message retention window (30 minutes)
   const maxMessageAgeMs = 30 * 60 * 1000;
-
   const isDataStale = lastIngestTimeMs ? (now - lastIngestTimeMs > 90 * 1000) : false;
 
-  // Filter fresh messages within max retention window
-  const freshMessages = telegramMessages.filter(m => (now - m.unixTimestamp) <= maxMessageAgeMs);
+  let geoUnresolvedCount = 0;
+  let lastTelegramMessageIso: string | null = null;
+
+  if (telegramMessages.length > 0) {
+    lastTelegramMessageIso = telegramMessages[0].timeIso;
+  }
+
+  // Filter fresh messages within max retention window, log stale ones
+  const freshMessages: TelegramMessage[] = [];
+  for (const m of telegramMessages) {
+    const msgTs = m.unixTimestamp || (m.timeIso ? new Date(m.timeIso).getTime() : now);
+    if ((now - msgTs) > maxMessageAgeMs) {
+      if (rejectedMessagesLog.length < 20) {
+        rejectedMessagesLog.push({
+          id: m.id,
+          channel: m.channel,
+          channelTitle: m.channelTitle,
+          text: m.text,
+          timeIso: m.timeIso || new Date(msgTs).toISOString(),
+          reason: 'stale',
+          reasonUk: 'Застаріле повідомлення (>30 хв)',
+          detailsUk: `Надійшло ${Math.round((now - msgTs) / 60000)} хв тому`
+        });
+      }
+    } else {
+      freshMessages.push({
+        ...m,
+        unixTimestamp: msgTs,
+        timeIso: m.timeIso || new Date(msgTs).toISOString()
+      });
+    }
+  }
 
   // Cluster Telegram messages to eliminate duplicate repost noise and extract true provenance
   const clusters = clusterTelegramMessages(freshMessages);
@@ -113,11 +177,14 @@ export function evaluateLocalSecurity(
     const classification = classifyThreat(repMsg.text);
     const geoResult = extractGeoFromText(repMsg.text);
 
-    const createdAtIso = new Date(cluster.earliestTimestamp).toISOString();
-    const lastConfirmedAtIso = new Date(cluster.latestTimestamp).toISOString();
-    const lastSourceAtIso = repMsg.timeIso;
+    const earliestTs = !isNaN(cluster.earliestTimestamp) && cluster.earliestTimestamp > 0 ? cluster.earliestTimestamp : now;
+    const latestTs = !isNaN(cluster.latestTimestamp) && cluster.latestTimestamp > 0 ? cluster.latestTimestamp : now;
 
-    const ageFromLastConfirmMs = Math.max(0, now - cluster.latestTimestamp);
+    const createdAtIso = new Date(earliestTs).toISOString();
+    const lastConfirmedAtIso = new Date(latestTs).toISOString();
+    const lastSourceAtIso = repMsg.timeIso || new Date(latestTs).toISOString();
+
+    const ageFromLastConfirmMs = Math.max(0, now - latestTs);
     const ageMinutes = Math.max(0, Math.floor(ageFromLastConfirmMs / 60000));
     const timeFreshnessText = ageMinutes <= 1 ? 'щойно' : `${ageMinutes} хв тому`;
 
@@ -131,7 +198,7 @@ export function evaluateLocalSecurity(
         const bearing = calculateBearingDegrees(userLat, userLng, loc.lat, loc.lng);
         const sector = getBearingSectorUk(bearing);
 
-        if (dist <= Math.max(userRadiusKm, 45.0)) {
+        if (dist <= Math.max(userRadiusKm, 60.0)) {
           let flugerZone: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT' = 'ZONE_DISTANT';
           if (dist <= 15) flugerZone = 'ZONE_15KM';
           else if (dist <= 30) flugerZone = 'ZONE_30KM';
@@ -144,6 +211,7 @@ export function evaluateLocalSecurity(
             category: 'ALL_CLEAR',
             categoryNameUk: 'Відбій / Чисто',
             severity: 'INFO',
+            eventType: 'OBSERVATION',
             createdAt: createdAtIso,
             lastConfirmedAt: lastConfirmedAtIso,
             lastSourceAt: lastSourceAtIso,
@@ -155,10 +223,12 @@ export function evaluateLocalSecurity(
             detectedOblast: loc.oblast,
             spatialPrecision: loc.type === 'microdistrict' ? 'EXACT_MICRODISTRICT' : loc.type === 'city' ? 'CITY_AREA' : 'RAION_SECTOR',
             spatialPrecisionUk: loc.type === 'microdistrict' ? 'Точна (мікрорайон)' : loc.type === 'city' ? 'Міська зона' : 'Районний сектор',
+            isApproximateLocation: loc.type !== 'microdistrict',
             threatCoordinates: { lat: loc.lat, lng: loc.lng },
             distanceKm: dist,
             honestDistanceText: `~${dist.toFixed(1)} км (${loc.name})`,
             isWithinRadius: dist <= userRadiusKm,
+            isSurroundingObservation: dist > userRadiusKm,
             confidence: 'HIGH',
             confidenceUk: 'Висока надійність',
             confidenceReason: `Підтверджено відбій / чисто у секторі ${loc.name}`,
@@ -185,8 +255,38 @@ export function evaluateLocalSecurity(
       continue;
     }
 
+    // Check if message is a non-tactical informational message
     if (!classification.isTacticalThreat) {
-      // Ignore generic noise
+      if (rejectedMessagesLog.length < 20) {
+        rejectedMessagesLog.push({
+          id: repMsg.id,
+          channel: repMsg.channel,
+          channelTitle: repMsg.channelTitle,
+          text: repMsg.text,
+          timeIso: repMsg.timeIso,
+          reason: 'unsupported_type',
+          reasonUk: 'Не є повідомленням про загрозу',
+          detailsUk: 'Загальна новина або сирена без тактичних цілей'
+        });
+      }
+      continue;
+    }
+
+    // Check if geo is completely missing
+    if (!geoResult.isSpecificLocationFound && geoResult.regionalZones.length === 0) {
+      geoUnresolvedCount++;
+      if (rejectedMessagesLog.length < 20) {
+        rejectedMessagesLog.push({
+          id: repMsg.id,
+          channel: repMsg.channel,
+          channelTitle: repMsg.channelTitle,
+          text: repMsg.text,
+          timeIso: repMsg.timeIso,
+          reason: 'no_geo',
+          reasonUk: 'Геолокація не розпізнана',
+          detailsUk: 'Текст не містить назви міста, району чи області'
+        });
+      }
       continue;
     }
 
@@ -222,111 +322,142 @@ export function evaluateLocalSecurity(
 
         const dist = calculateDistanceKm(userLat, userLng, loc.lat, loc.lng);
         const isDirect = dist <= userRadiusKm;
-        const isFlugerCoverage = dist <= 60.0;
+        const isSurroundingObservation = !isDirect && dist <= 75.0;
 
-        if (isDirect || isFlugerCoverage) {
-          const bearing = calculateBearingDegrees(userLat, userLng, loc.lat, loc.lng);
-          const sector = getBearingSectorUk(bearing);
-
-          let flugerZone: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT' = 'ZONE_DISTANT';
-          if (dist <= 15) flugerZone = 'ZONE_15KM';
-          else if (dist <= 30) flugerZone = 'ZONE_30KM';
-          else if (dist <= 45) flugerZone = 'ZONE_45KM';
-
-          let spatialPrecision: SpatialPrecision = 'RAION_SECTOR';
-          let spatialPrecisionUk = 'Районний сектор';
-          let honestDistanceText = `~${dist.toFixed(1)} км (${loc.name}, ${sector})`;
-
-          if (loc.type === 'microdistrict') {
-            spatialPrecision = 'EXACT_MICRODISTRICT';
-            spatialPrecisionUk = 'Точна (мікрорайон)';
-            honestDistanceText = `~${dist.toFixed(1)} км (${loc.name})`;
-          } else if (loc.type === 'city') {
-            spatialPrecision = 'CITY_AREA';
-            spatialPrecisionUk = 'Міська зона';
-            honestDistanceText = dist <= 8.0 ? `У межах міста ${loc.name} (~${dist.toFixed(1)} км)` : `Напрямок міста ${loc.name} (~${dist.toFixed(1)} км, ${sector})`;
-          } else {
-            spatialPrecision = 'RAION_SECTOR';
-            spatialPrecisionUk = 'Район / Населений пункт';
-            honestDistanceText = `Сектор району ${loc.name} (~${dist.toFixed(1)} км, ${sector})`;
+        // If distance is too far (> 75 km) and not in user's immediate surrounding, log rejected
+        if (!isDirect && !isSurroundingObservation) {
+          if (rejectedMessagesLog.length < 20) {
+            rejectedMessagesLog.push({
+              id: repMsg.id,
+              channel: repMsg.channel,
+              channelTitle: repMsg.channelTitle,
+              text: repMsg.text,
+              timeIso: repMsg.timeIso,
+              reason: 'outside_range',
+              reasonUk: `Поза зоною моніторингу (~${Math.round(dist)} км)`,
+              detailsUk: `Локація ${loc.name} знаходиться далі ніж 75 км`
+            });
           }
-
-          // Strict distinction between Confidence and Geo Precision
-          let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
-          let confidenceUk = 'Середня надійність';
-          let confidenceReason = `Зафіксовано загрозу в радіусі ${dist.toFixed(1)} км (${loc.name}, ${sector})`;
-
-          if (cluster.effectiveAuthority >= 0.94 && (dist <= 15 || loc.type === 'microdistrict')) {
-            confidence = 'HIGH';
-            confidenceUk = 'Висока надійність (Офіційний радар)';
-            confidenceReason = `Підтверджено провідним радаром (@${cluster.primaryChannel}) у вашому секторі (${loc.name})`;
-          } else if (cluster.sourceCount >= 2 && dist <= 20) {
-            confidence = 'HIGH';
-            confidenceUk = 'Висока надійність (Кілька джерел)';
-            confidenceReason = `Підтверджено кількома джерелами у районі ${loc.name}`;
-          } else if (dist <= 30) {
-            confidence = 'MEDIUM';
-            confidenceUk = 'Середня надійність';
-            confidenceReason = `Ціль спостерігається у секторі ${loc.name} (~${dist.toFixed(1)} км, ${sector})`;
-          } else {
-            confidence = 'LOW';
-            confidenceUk = 'Раннє спостереження';
-            confidenceReason = `Раннє радарне спостереження (~${dist.toFixed(1)} км, ${sector})`;
-          }
-
-          const voiceAlertText = `${userName}, увага. Є підтверджена загроза (${classification.categoryNameUk}) поблизу ${loc.name}, дистанція ${Math.round(dist)} кілометрів, напрямок ${sector}. Негайно пройдіть в укриття!`;
-
-          threatEvents.push({
-            id: cluster.id + '_' + loc.name,
-            source: 'telegram',
-            sourceTitle: cluster.primaryChannelTitle,
-            category: classification.category,
-            categoryNameUk: classification.categoryNameUk,
-            severity: isDirect ? classification.severity : 'MEDIUM',
-            createdAt: createdAtIso,
-            lastConfirmedAt: lastConfirmedAtIso,
-            lastSourceAt: lastSourceAtIso,
-            status: locStatus,
-            statusBadgeUk: locStatusBadgeUk,
-            ttlMinutes,
-            ageMinutes,
-            detectedLocation: loc.name,
-            detectedOblast: loc.oblast,
-            spatialPrecision,
-            spatialPrecisionUk,
-            threatCoordinates: { lat: loc.lat, lng: loc.lng },
-            distanceKm: dist,
-            honestDistanceText,
-            isWithinRadius: isDirect,
-            confidence,
-            confidenceUk,
-            confidenceReason,
-            sourceCount: cluster.sourceCount,
-            repostCount: cluster.repostCount,
-            sourceSummaryText: cluster.sourceSummaryText,
-            sourcesList: cluster.sources,
-            whyTriggeredReasons: [
-              `✓ Ваша локація: ${nearestUserLoc.location.name}`,
-              `✓ Знайдено у тексті: «${geoResult.matchedKeywords.join(', ') || loc.name}»`,
-              `✓ Джерело: @${cluster.primaryChannel} (${cluster.primaryChannelTitle}, вага ${cluster.effectiveAuthority.toFixed(2)})`,
-              `✓ Підтвердження: ${cluster.sourceSummaryText}`,
-              `✓ Час: ${timeFreshnessText} (TTL: ${ttlMinutes} хв)`
-            ],
-            requiresImmediateShelter: isDirect && classification.requiresImmediateShelter && locStatus === 'active',
-            rawText: repMsg.text,
-            timestamp: repMsg.timeIso,
-            voiceAlertText,
-            flugerZone,
-            bearingDegrees: bearing,
-            bearingSectorUk: sector
-          });
+          continue;
         }
+
+        const bearing = calculateBearingDegrees(userLat, userLng, loc.lat, loc.lng);
+        const sector = getBearingSectorUk(bearing);
+
+        let flugerZone: 'ZONE_15KM' | 'ZONE_30KM' | 'ZONE_45KM' | 'ZONE_DISTANT' = 'ZONE_DISTANT';
+        if (dist <= 15) flugerZone = 'ZONE_15KM';
+        else if (dist <= 30) flugerZone = 'ZONE_30KM';
+        else if (dist <= 45) flugerZone = 'ZONE_45KM';
+
+        let spatialPrecision: SpatialPrecision = 'RAION_SECTOR';
+        let spatialPrecisionUk = 'Районний сектор';
+        let honestDistanceText = isDirect
+          ? `~${dist.toFixed(1)} км (${loc.name}, ${sector})`
+          : `~${dist.toFixed(1)} км (${loc.name}, поза зоною ${userRadiusKm} км)`;
+
+        if (loc.type === 'microdistrict') {
+          spatialPrecision = 'EXACT_MICRODISTRICT';
+          spatialPrecisionUk = 'Точна (мікрорайон)';
+          honestDistanceText = isDirect
+            ? `~${dist.toFixed(1)} км (${loc.name})`
+            : `~${dist.toFixed(1)} км (${loc.name}, ${sector})`;
+        } else if (loc.type === 'city') {
+          spatialPrecision = 'CITY_AREA';
+          spatialPrecisionUk = 'Міська зона';
+          honestDistanceText = dist <= 8.0
+            ? `У межах міста ${loc.name} (~${dist.toFixed(1)} км)`
+            : isDirect
+            ? `Напрямок міста ${loc.name} (~${dist.toFixed(1)} км, ${sector})`
+            : `~${dist.toFixed(1)} км (${loc.name}, ${sector})`;
+        } else {
+          spatialPrecision = 'RAION_SECTOR';
+          spatialPrecisionUk = 'Населений пункт / Сектор';
+          honestDistanceText = isDirect
+            ? `Сектор ${loc.name} (~${dist.toFixed(1)} км, ${sector})`
+            : `~${dist.toFixed(1)} км (${loc.name}, ${sector})`;
+        }
+
+        // STRICT SEPARATION: OBSERVATION vs CONFIRMED THREAT
+        let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
+        let confidenceUk = 'Середня надійність';
+        let confidenceReason = `Зафіксовано спостереження у секторі ${loc.name} (~${dist.toFixed(1)} км, ${sector})`;
+
+        if (cluster.effectiveAuthority >= 0.94 && (isDirect || loc.type === 'microdistrict')) {
+          confidence = 'HIGH';
+          confidenceUk = 'Висока надійність (Офіційний радар)';
+          confidenceReason = `Підтверджено провідним радаром (@${cluster.primaryChannel}) у вашому секторі (${loc.name})`;
+        } else if (cluster.sourceCount >= 2 && dist <= Math.max(userRadiusKm, 25)) {
+          confidence = 'HIGH';
+          confidenceUk = 'Висока надійність (Кілька джерел)';
+          confidenceReason = `Підтверджено кількома джерелами у районі ${loc.name}`;
+        } else if (dist <= userRadiusKm) {
+          confidence = 'MEDIUM';
+          confidenceUk = 'Середня надійність';
+          confidenceReason = `Ціль спостерігається у секторі ${loc.name} (~${dist.toFixed(1)} км, ${sector})`;
+        } else {
+          confidence = 'LOW';
+          confidenceUk = 'Раннє спостереження';
+          confidenceReason = `Раннє радарне спостереження (~${dist.toFixed(1)} км, ${sector})`;
+        }
+
+        // Event type differentiation
+        const isConfirmedThreat = isDirect && (confidence === 'HIGH' || classification.severity === 'CRITICAL' || cluster.sourceCount >= 2);
+        const eventType: ThreatEventType = isConfirmedThreat ? 'CONFIRMED_THREAT' : 'OBSERVATION';
+
+        const voiceAlertText = `${userName}, увага. Є підтверджена загроза (${classification.categoryNameUk}) поблизу ${loc.name}, дистанція ${Math.round(dist)} кілометрів, напрямок ${sector}. Негайно пройдіть в укриття!`;
+
+        threatEvents.push({
+          id: cluster.id + '_' + loc.name,
+          source: 'telegram',
+          sourceTitle: cluster.primaryChannelTitle,
+          category: classification.category,
+          categoryNameUk: classification.categoryNameUk,
+          severity: isDirect ? classification.severity : 'MEDIUM',
+          eventType,
+          createdAt: createdAtIso,
+          lastConfirmedAt: lastConfirmedAtIso,
+          lastSourceAt: lastSourceAtIso,
+          status: locStatus,
+          statusBadgeUk: locStatusBadgeUk,
+          ttlMinutes,
+          ageMinutes,
+          detectedLocation: loc.name,
+          detectedOblast: loc.oblast,
+          spatialPrecision,
+          spatialPrecisionUk,
+          isApproximateLocation: loc.type !== 'microdistrict',
+          threatCoordinates: { lat: loc.lat, lng: loc.lng },
+          distanceKm: dist,
+          honestDistanceText,
+          isWithinRadius: isDirect,
+          isSurroundingObservation,
+          confidence,
+          confidenceUk,
+          confidenceReason,
+          sourceCount: cluster.sourceCount,
+          repostCount: cluster.repostCount,
+          sourceSummaryText: cluster.sourceSummaryText,
+          sourcesList: cluster.sources,
+          whyTriggeredReasons: [
+            `✓ Ваша локація: ${nearestUserLoc.location.name}`,
+            `✓ Знайдено у тексті: «${geoResult.matchedKeywords.join(', ') || loc.name}»`,
+            `✓ Джерело: @${cluster.primaryChannel} (${cluster.primaryChannelTitle}, вага ${cluster.effectiveAuthority.toFixed(2)})`,
+            `✓ Підтвердження: ${cluster.sourceSummaryText}`,
+            `✓ Час: ${timeFreshnessText} (TTL: ${ttlMinutes} хв)`
+          ],
+          requiresImmediateShelter: isDirect && isConfirmedThreat && classification.requiresImmediateShelter && locStatus === 'active',
+          rawText: repMsg.text,
+          timestamp: repMsg.timeIso,
+          voiceAlertText,
+          flugerZone,
+          bearingDegrees: bearing,
+          bearingSectorUk: sector
+        });
       }
     }
     // C. Handle Purely Regional Mentions (e.g. "Київщина", "Чернігівщина") without a specific town pin
     else if (geoResult.regionalZones.length > 0) {
       for (const zone of geoResult.regionalZones) {
-        // Check if user is in this oblast
         if (nearestUserLoc.location.oblast === zone.oblast) {
           let regStatus = status;
           let regStatusBadgeUk = statusBadgeUk;
@@ -348,7 +479,8 @@ export function evaluateLocalSecurity(
             sourceTitle: cluster.primaryChannelTitle,
             category: classification.category,
             categoryNameUk: classification.categoryNameUk,
-            severity: 'MEDIUM', // Regional notice is ALWAYS Attention (ORANGE), never Direct Red
+            severity: 'MEDIUM',
+            eventType: 'OBSERVATION', // Regional corridor is ALWAYS an observation, never a direct red threat
             createdAt: createdAtIso,
             lastConfirmedAt: lastConfirmedAtIso,
             lastSourceAt: lastSourceAtIso,
@@ -360,10 +492,12 @@ export function evaluateLocalSecurity(
             detectedOblast: zone.oblast,
             spatialPrecision: 'REGIONAL_CORRIDOR',
             spatialPrecisionUk: 'Регіональний простір (область)',
+            isApproximateLocation: true,
             threatCoordinates: undefined, // NO FAKE PIN!
             distanceKm: null,
             honestDistanceText: 'В межах області (місце невизначене, ~30-60 км)',
             isWithinRadius: false,
+            isSurroundingObservation: true,
             confidence: cluster.effectiveAuthority >= 0.94 ? 'HIGH' : 'MEDIUM',
             confidenceUk: 'Підтверджено в області (точне місце невизначене)',
             confidenceReason: `Повідомлення стосується загального простору (${zone.name})`,
@@ -385,12 +519,31 @@ export function evaluateLocalSecurity(
             bearingDegrees: bearing,
             bearingSectorUk: sector
           });
+        } else {
+          if (rejectedMessagesLog.length < 20) {
+            rejectedMessagesLog.push({
+              id: repMsg.id,
+              channel: repMsg.channel,
+              channelTitle: repMsg.channelTitle,
+              text: repMsg.text,
+              timeIso: repMsg.timeIso,
+              reason: 'outside_range',
+              reasonUk: `Інша область (${zone.name})`,
+              detailsUk: `Користувач у ${nearestUserLoc.location.oblast}`
+            });
+          }
         }
       }
     }
   }
 
-  // 3. Determine Overall Security State (Strictly considering ONLY active tactical threats)
+  // 3. Separate Confirmed Threats vs Observations
+  const activeEvents = threatEvents.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
+  const confirmedThreatsList = activeEvents.filter(t => t.eventType === 'CONFIRMED_THREAT' && t.isWithinRadius);
+  const observationsList = activeEvents.filter(t => t.eventType === 'OBSERVATION' || !t.isWithinRadius);
+  const outsideZoneObservations = activeEvents.filter(t => t.isSurroundingObservation || (!t.isWithinRadius && t.distanceKm !== null && t.distanceKm <= 75));
+
+  // 4. Determine Overall Security State (Strictly considering ONLY active threats in local radius)
   let overallState: SecurityState = 'GREEN';
   let stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
   let stateDescriptionUk = 'Локальних загроз поблизу не виявлено. Джерела сканують ваш сектор.';
@@ -401,25 +554,24 @@ export function evaluateLocalSecurity(
     stateBadgeUk = 'МОНІТОРИНГ НЕПОВНИЙ';
     stateDescriptionUk = 'Дані застаріли (>90с) або відсутній зв’язок із радарними джерелами.';
   } else {
-    // ACTIVE THREATS ONLY: Ignore stale, cleared, or all-clear events for active alert status
-    const activeThreats = threatEvents.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID');
-    const criticalDirectThreats = activeThreats.filter(t => t.requiresImmediateShelter && t.isWithinRadius);
-    const warningThreats = activeThreats;
-
-    if (criticalDirectThreats.length > 0) {
+    if (confirmedThreatsList.length > 0) {
       overallState = 'RED';
-      primaryThreat = criticalDirectThreats[0];
+      primaryThreat = confirmedThreatsList[0];
       stateBadgeUk = 'НЕБЕЗПЕКА ПОРУЧ';
       stateDescriptionUk = primaryThreat.confidenceReason;
-    } else if (warningThreats.length > 0) {
+    } else if (activeEvents.some(t => t.isWithinRadius)) {
       overallState = 'ORANGE';
-      primaryThreat = warningThreats[0];
-      stateBadgeUk = 'УВАГА В ОБЛАСТІ';
-      stateDescriptionUk = primaryThreat.confidenceReason;
+      primaryThreat = activeEvents.find(t => t.isWithinRadius) || null;
+      stateBadgeUk = 'УВАГА В СЕКТОРІ';
+      stateDescriptionUk = primaryThreat ? primaryThreat.confidenceReason : 'Виявлено спостереження у вашому радіусі.';
     } else {
       overallState = 'GREEN';
       stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
-      stateDescriptionUk = 'Локальних загроз поблизу не виявлено. Джерела сканують ваш сектор.';
+      if (outsideZoneObservations.length > 0) {
+        stateDescriptionUk = `Локальної загрози в зоні ${userRadiusKm} км не підтверджено. Активно ${outsideZoneObservations.length} спостережень за межами зони (35–65 км).`;
+      } else {
+        stateDescriptionUk = `Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор.`;
+      }
     }
   }
 
@@ -431,13 +583,22 @@ export function evaluateLocalSecurity(
     hasAttentionWarning: overallState === 'ORANGE',
     primaryThreat,
     threatEvents,
+    observationsList,
+    confirmedThreatsList,
+    outsideZoneObservations,
     allClearDetected: threatEvents.some(t => t.category === 'ALL_CLEAR'),
     userNearestKnownLocation: nearestUserLoc.location.name,
     userOblast: nearestUserLoc.location.oblast,
     totalSourcesEvaluated: telegramMessages.length,
     totalClustersAnalyzed: clusters.length,
+    observationsCount: observationsList.length,
+    threatsCount: confirmedThreatsList.length,
+    outsideZoneObservationsCount: outsideZoneObservations.length,
+    rejectedCount: rejectedMessagesLog.length,
+    geoUnresolvedCount,
+    lastTelegramMessageIso,
+    rejectedMessagesLog: rejectedMessagesLog.slice(0, 10),
     evaluationTimestamp: new Date().toISOString(),
     isDataStale
   };
 }
-
