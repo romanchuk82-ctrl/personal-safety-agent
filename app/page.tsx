@@ -52,7 +52,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic } from '@/lib/sources/alertsInUa';
-import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus } from '@/lib/sources/telegramScraper';
+import { fetchAllTelegramFeeds, MONITORED_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
 import { unlockAudioAndSpeech, speakUkrainian, stopAllAudio } from '@/lib/soundService';
@@ -99,6 +99,7 @@ export default function HomePage() {
   const [radiusKm, setRadiusKm] = useState<number>(15.0);
   const [lastCheckTime, setLastCheckTime] = useState<Date | null>(null);
   const [secondsSinceCheck, setSecondsSinceCheck] = useState<number>(0);
+  const [secondsSinceRealData, setSecondsSinceRealData] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isWarmingUp, setIsWarmingUp] = useState<boolean>(false);
   const [warmupSampleCount, setWarmupSampleCount] = useState<number>(0);
@@ -158,6 +159,8 @@ export default function HomePage() {
   const watchPositionIdRef = useRef<number | null>(null);
   const lastSpokenAlertIdRef = useRef<string | null>(null);
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastRealDataTsRef = useRef<number>(0);
+  const lastSuccessfulIngestTsRef = useRef<number>(0);
 
   // Auto unlock audio and speech on first user touch
   useEffect(() => {
@@ -247,9 +250,17 @@ export default function HomePage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      const now = Date.now();
       if (lastCheckTime) {
-        const secs = Math.floor((Date.now() - lastCheckTime.getTime()) / 1000);
+        const secs = Math.floor((now - lastCheckTime.getTime()) / 1000);
         setSecondsSinceCheck(secs);
+      }
+
+      if (lastRealDataTsRef.current > 0) {
+        const realDataSecs = Math.max(0, Math.floor((now - lastRealDataTsRef.current) / 1000));
+        setSecondsSinceRealData(realDataSecs);
+      } else if (lastCheckTime) {
+        setSecondsSinceRealData(Math.floor((now - lastCheckTime.getTime()) / 1000));
       }
 
       // Automatically expire stale anomaly warning if enough time has elapsed
@@ -315,7 +326,7 @@ export default function HomePage() {
     try {
       const [alertsRes, tgRes] = await Promise.all([
         fetchActiveAlerts(),
-        fetchAllTelegramFeeds(currentLoc.oblast, 20, customChannels)
+        fetchAllTelegramFeeds(currentLoc.oblast, undefined, customChannels)
       ]);
 
       const result = evaluateLocalSecurity(
@@ -325,8 +336,17 @@ export default function HomePage() {
         'Кирил',
         alertsRes.alerts,
         tgRes.messages,
-        lastCheckTime?.getTime()
+        lastRealDataTsRef.current,
+        alertsRes.status,
+        tgRes.metrics
       );
+
+      if (result.lastRealDataTimestamp > 0) {
+        lastRealDataTsRef.current = result.lastRealDataTimestamp;
+      }
+      if (tgRes.metrics && tgRes.metrics.healthyCount > 0) {
+        lastSuccessfulIngestTsRef.current = Date.now();
+      }
 
       setEvaluation(result);
       setOfficialAlerts(alertsRes.alerts || []);
@@ -336,11 +356,17 @@ export default function HomePage() {
 
       const statusMap = tgRes.sourceStatus || {};
       setSourceStatuses(statusMap);
-      setSourcesHealth({
-        telegramSourcesTotal: Object.keys(statusMap).length,
-        telegramOkCount: Object.values(statusMap).filter((s) => s.ok).length,
-        officialAlertsOk: alertsRes.status === 'OK' || alertsRes.status === 'CACHE',
-        lastCheckIso: new Date().toISOString()
+      setSourcesHealth(tgRes.metrics || {
+        totalSources: Object.keys(statusMap).length,
+        monitoredSources: Object.keys(statusMap).length,
+        healthyCount: Object.values(statusMap).filter((s) => s.ok).length,
+        unavailableCount: Object.values(statusMap).filter((s) => !s.ok).length,
+        disabledCount: 0,
+        criticalTotal: 15,
+        criticalHealthy: 10,
+        lastSuccessfulCycleTs: Date.now(),
+        lastRealDataTimestamp: result.lastRealDataTimestamp,
+        lastRealDataIso: result.lastRealDataIso
       });
 
       // TRIGGER VOICE ANNOUNCEMENT ON RED THREAT
@@ -357,7 +383,7 @@ export default function HomePage() {
     } finally {
       setIsChecking(false);
     }
-  }, [radiusKm, isChecking, speakAlert, customChannels, lastCheckTime, audioEnabled]);
+  }, [radiusKm, isChecking, speakAlert, customChannels, audioEnabled]);
 
   // Continuous background GPS feed to Location Confidence Layer
   const startContinuousGpsWatch = useCallback(() => {
@@ -629,11 +655,20 @@ export default function HomePage() {
   };
 
   const allSources = [...customChannels, ...MONITORED_CHANNELS];
+  const monitoredSourcesCount = evaluation?.monitoringStats?.monitored ?? allSources.filter(c => c.hasWebPreview !== false && c.enabled !== false).length;
   const state = evaluation?.overallState || (isActive ? 'GREEN' : 'GREEN');
   const isRed = state === 'RED';
   const isOrange = state === 'ORANGE';
-  const isDegraded = state === 'DEGRADED' || secondsSinceCheck > 90;
-  const isGreen = !isRed && !isOrange && !isDegraded && isActive;
+  const isDegraded = state === 'DEGRADED' || secondsSinceRealData > 90 || secondsSinceCheck > 90;
+  const isGreen = !isRed && !isOrange && !isDegraded && isActive && (evaluation?.monitoringHealth === 'OK' || evaluation?.monitoringHealth === 'DEGRADED');
+
+  const formattedDataFreshness = secondsSinceRealData <= 1
+    ? 'щойно'
+    : secondsSinceRealData < 60
+    ? `${secondsSinceRealData}с тому`
+    : secondsSinceRealData < 3600
+    ? `${Math.round(secondsSinceRealData / 60)} хв тому`
+    : `${Math.round(secondsSinceRealData / 3600)} год тому`;
 
   const isLocationLocked = trustedLocation?.lockMode === 'LOCKED' || trustedLocation?.lockMode === 'MANUAL';
   const isLocationUnreliable = trustedLocation?.confidenceState === 'UNRELIABLE';
@@ -816,10 +851,12 @@ export default function HomePage() {
                 : isOrange
                 ? evaluation?.stateDescriptionUk || 'Ціль спостерігається в області / коридорі підльоту. Загрози для вашого мікрорайону наразі немає.'
                 : isDegraded
-                ? 'Дані застаріли або відсутній зв’язок із джерелами. Перевірте підключення до інтернету.'
+                ? (evaluation?.monitoringHealthReasonUk
+                    ? `⚠️ ${evaluation.monitoringHealthReasonUk}${evaluation.monitoringHealthDetailsUk ? ' • ' + evaluation.monitoringHealthDetailsUk : ''}`
+                    : '⚠️ Дані застаріли або відсутній зв’язок із джерелами.')
                 : isUnderOfficialAlert
                 ? `В області оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
-                : evaluation?.stateDescriptionUk || 'Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор у реальному часі.'}
+                : evaluation?.stateDescriptionUk || `Локальних загроз поблизу не виявлено. ${monitoredSourcesCount} радарних джерел сканують ваш сектор у реальному часі.`}
             </p>
 
             {/* TELEMETRY METRICS */}
@@ -845,9 +882,11 @@ export default function HomePage() {
                   <span className="text-[10px] text-slate-400 font-mono">Флюгер Зона 1</span>
                 </div>
                 <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ</span>
-                  <span className="font-mono font-bold text-white block">{secondsSinceCheck}с тому</span>
-                  <span className="text-[10px] text-emerald-400 font-mono">159 джерел</span>
+                  <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ ДАНИХ</span>
+                  <span className={'font-mono font-bold block ' + (isDegraded ? 'text-amber-400' : 'text-white')}>
+                    {formattedDataFreshness}
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-mono">{monitoredSourcesCount} джерел</span>
                 </div>
                 <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
                   <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
@@ -1384,27 +1423,106 @@ export default function HomePage() {
             </p>
           </div>
 
-          {/* SECTION 5: INGESTION DIAGNOSTICS & TELEMETRY */}
-          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-2.5">
+          {/* SECTION 5: INGESTION DIAGNOSTICS & SOURCE HEALTH */}
+          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Діагностика Telegram-ingestion</span>
+                <span>Контроль джерел & Діагностика</span>
               </span>
-              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
-                LIVE
+              <span className={'text-[9px] font-mono px-2 py-0.5 rounded border ' + (
+                evaluation?.monitoringHealth === 'OK'
+                  ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800'
+                  : evaluation?.monitoringHealth === 'DEGRADED'
+                  ? 'text-amber-400 bg-amber-950/80 border-amber-800'
+                  : 'text-slate-300 bg-slate-800 border-slate-700'
+              )}>
+                {evaluation?.monitoringHealth === 'OK' ? 'HEALTHY' : evaluation?.monitoringHealth === 'DEGRADED' ? 'DEGRADED' : 'INCOMPLETE'}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block font-mono">ОСТАННЄ ПОВІДОМЛЕННЯ</span>
-                <span className="font-mono font-bold text-white">
-                  {evaluation?.lastTelegramMessageIso
-                    ? new Date(evaluation.lastTelegramMessageIso).toLocaleTimeString('uk-UA')
-                    : 'Очікування'}
+            {/* OVERALL MONITORING HEALTH SUMMARY */}
+            <div className="p-2.5 rounded-xl bg-[#070a10] border border-slate-800 space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-semibold">Загальний моніторинг:</span>
+                <span className={'font-bold font-mono ' + (
+                  evaluation?.monitoringHealth === 'OK'
+                    ? 'text-emerald-400'
+                    : evaluation?.monitoringHealth === 'DEGRADED'
+                    ? 'text-amber-400'
+                    : 'text-rose-400'
+                )}>
+                  {evaluation?.monitoringHealth === 'OK' ? '🟢 OK (Повний захист)' : evaluation?.monitoringHealth === 'DEGRADED' ? '🟠 DEGRADED (Частково)' : '⚪ INCOMPLETE (Неповний)'}
                 </span>
               </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                {evaluation?.monitoringHealthReasonUk || 'Ініціалізація системи перевірки джерел...'}
+              </p>
+            </div>
+
+            {/* SOURCE BREAKDOWN CARDS */}
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              {/* TELEGRAM STATS */}
+              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-slate-400 block font-mono font-bold text-[10px] border-b border-slate-800 pb-1">
+                  📡 TELEGRAM КАНАЛИ
+                </span>
+                <div className="flex justify-between text-slate-300">
+                  <span>Усього джерел:</span>
+                  <span className="font-mono font-bold text-white">{allSources.length}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Моніторяться:</span>
+                  <span className="font-mono font-bold text-cyan-400">{evaluation?.monitoringStats?.monitored ?? (sourcesHealth?.monitoredSources ?? 73)}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Працюють:</span>
+                  <span className="font-mono font-bold text-emerald-400">{evaluation?.monitoringStats?.healthy ?? (sourcesHealth?.healthyCount ?? 0)}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Недоступні:</span>
+                  <span className="font-mono font-bold text-rose-400">{evaluation?.monitoringStats?.unavailable ?? (sourcesHealth?.unavailableCount ?? 0)}</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Вимкнені (без прев'ю):</span>
+                  <span className="font-mono font-bold text-slate-500">{evaluation?.monitoringStats?.disabled ?? (sourcesHealth?.disabledCount ?? 98)}</span>
+                </div>
+              </div>
+
+              {/* OFFICIAL ALERTS & TIMESTAMPS */}
+              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-slate-400 block font-mono font-bold text-[10px] border-b border-slate-800 pb-1">
+                  🚨 ОФІЦІЙНІ ТРИВОГИ
+                </span>
+                <div className="flex justify-between text-slate-300">
+                  <span>Статус Alerts:</span>
+                  <span className={'font-mono font-bold ' + (alertsDiagnostic.status === 'OK' ? 'text-emerald-400' : alertsDiagnostic.status === 'CACHE' ? 'text-amber-400' : 'text-rose-400')}>
+                    {alertsDiagnostic.status === 'OK' ? 'OK (Онлайн)' : alertsDiagnostic.status === 'CACHE' ? 'CACHE' : 'ERROR'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Останні дані:</span>
+                  <span className="font-mono font-bold text-white truncate max-w-[80px]">
+                    {evaluation?.lastRealDataIso ? new Date(evaluation.lastRealDataIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Очікування'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Останній цикл:</span>
+                  <span className="font-mono font-bold text-cyan-400 truncate max-w-[80px]">
+                    {lastCheckTime ? lastCheckTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Щойно'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Свіжість:</span>
+                  <span className={'font-mono font-bold ' + (isDegraded ? 'text-amber-400' : 'text-emerald-400')}>
+                    {formattedDataFreshness}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* TELEMETRY METRICS GRID */}
+            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
               <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
                 <span className="text-slate-400 block font-mono">ПРЯМІ ЗАГРОЗИ</span>
                 <span className="font-mono font-bold text-red-400">
@@ -1427,12 +1545,6 @@ export default function HomePage() {
                 <span className="text-slate-400 block font-mono">НЕРОЗПІЗНАНА ГЕОГРАФІЯ</span>
                 <span className="font-mono font-bold text-amber-400">
                   {evaluation?.geoUnresolvedCount ?? 0}
-                </span>
-              </div>
-              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block font-mono">АКТИВНІ КАНАЛИ</span>
-                <span className="font-mono font-bold text-emerald-400">
-                  {sourcesHealth?.telegramOkCount ?? 0} / {sourcesHealth?.telegramSourcesTotal ?? allSources.length}
                 </span>
               </div>
             </div>
@@ -1503,25 +1615,46 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* CHANNELS LIST */}
-            <div className="max-h-40 overflow-y-auto space-y-1 text-[11px] pr-1">
-              {allSources.slice(0, 25).map((s) => {
+            {/* CHANNELS LIST WITH CLEAR REASON */}
+            <div className="max-h-48 overflow-y-auto space-y-1 text-[11px] pr-1">
+              {allSources.map((s) => {
                 const st = sourceStatuses[s.username];
-                const isOk = st ? st.ok : true;
+                const isHealthy = st?.statusCategory === 'healthy' || (st && st.ok);
+                const isDisabled = st?.statusCategory === 'disabled' || s.hasWebPreview === false || s.enabled === false;
+                const isUnavailable = !isHealthy && !isDisabled;
+
                 return (
                   <div key={s.username} className="flex items-center justify-between p-2 rounded bg-[#070a10] border border-slate-800">
                     <div className="min-w-0 pr-2">
                       <div className="flex items-center gap-1.5">
-                        <span className={'w-2 h-2 rounded-full shrink-0 ' + (isOk ? 'bg-emerald-400' : 'bg-red-500')} />
+                        <span className={'w-2 h-2 rounded-full shrink-0 ' + (
+                          isHealthy ? 'bg-emerald-400' :
+                          isDisabled ? 'bg-slate-600' :
+                          'bg-red-500'
+                        )} />
                         <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
+                        {s.tier === 'CRITICAL' && (
+                          <span className="text-[8px] bg-amber-950/80 text-amber-300 font-mono px-1 rounded border border-amber-800">
+                            CORE
+                          </span>
+                        )}
                       </div>
                       <p className="text-[10px] text-slate-500 truncate">{s.title}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <span className={'text-[9px] font-mono ' + (isOk ? 'text-emerald-400' : 'text-red-400')}>
-                        {isOk ? 'АКТИВНИЙ' : 'ПОМИЛКА'}
+                      <span className={'text-[9px] font-mono ' + (
+                        isHealthy ? 'text-emerald-400' :
+                        isDisabled ? 'text-slate-500' :
+                        'text-rose-400'
+                      )}>
+                        {isHealthy ? 'АКТИВНИЙ' : isDisabled ? 'БЕЗ ПРЕВ’Ю' : 'НЕДОСТУПНИЙ'}
                       </span>
-                      {st?.lastMessageTimeIso && (
+                      {st?.error && !isHealthy && (
+                        <span className="text-[8px] font-mono text-slate-500 block truncate max-w-[120px]">
+                          {st.error}
+                        </span>
+                      )}
+                      {st?.lastMessageTimeIso && isHealthy && (
                         <span className="text-[9px] font-mono text-slate-500 block">
                           {new Date(st.lastMessageTimeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
                         </span>

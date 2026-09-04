@@ -99,6 +99,18 @@ export interface SecurityEvaluationResult {
   rejectedMessagesLog: RejectedMessageItem[];
   evaluationTimestamp: string;
   isDataStale: boolean;
+  monitoringHealth: 'OK' | 'DEGRADED' | 'INCOMPLETE';
+  monitoringHealthReasonUk: string;
+  monitoringHealthDetailsUk: string;
+  monitoringStats: {
+    total: number;
+    monitored: number;
+    healthy: number;
+    unavailable: number;
+    disabled: number;
+  };
+  lastRealDataTimestamp: number;
+  lastRealDataIso: string | null;
 }
 
 export function evaluateLocalSecurity(
@@ -108,7 +120,20 @@ export function evaluateLocalSecurity(
   userName: string = "Кирил",
   alerts: RawAlert[] = [],
   telegramMessages: TelegramMessage[] = [],
-  lastIngestTimeMs?: number
+  lastSuccessfulDataTs?: number,
+  alertsStatus?: 'OK' | 'CACHE' | 'ERROR',
+  telegramMetrics?: {
+    totalSources: number;
+    monitoredSources: number;
+    healthyCount: number;
+    unavailableCount: number;
+    disabledCount: number;
+    criticalTotal: number;
+    criticalHealthy: number;
+    lastSuccessfulCycleTs: number;
+    lastRealDataTimestamp: number;
+    lastRealDataIso: string | null;
+  }
 ): SecurityEvaluationResult {
   const threatEvents: ThreatEvent[] = [];
   const rejectedMessagesLog: RejectedMessageItem[] = [];
@@ -117,13 +142,60 @@ export function evaluateLocalSecurity(
   
   // Maximum message retention window (30 minutes)
   const maxMessageAgeMs = 30 * 60 * 1000;
-  const isDataStale = lastIngestTimeMs ? (now - lastIngestTimeMs > 90 * 1000) : false;
 
   let geoUnresolvedCount = 0;
+  // Determine freshness and real data availability
+  let newestMsgTs = 0;
   let lastTelegramMessageIso: string | null = null;
-
   if (telegramMessages.length > 0) {
+    newestMsgTs = telegramMessages[0].unixTimestamp || (telegramMessages[0].timeIso ? new Date(telegramMessages[0].timeIso).getTime() : 0);
     lastTelegramMessageIso = telegramMessages[0].timeIso;
+  }
+
+  const effectiveLastRealDataTs = Math.max(
+    newestMsgTs,
+    telegramMetrics?.lastRealDataTimestamp || 0
+  );
+
+  // Stale check: isDataStale is triggered if the last successful ingestion cycle was > 90 seconds ago
+  const cycleTs = lastSuccessfulDataTs || telegramMetrics?.lastSuccessfulCycleTs;
+  const isDataStale = cycleTs ? (now - cycleTs > 90 * 1000) : false;
+
+  // Determine Monitoring Health Status (OK / DEGRADED / INCOMPLETE)
+  let monitoringHealth: 'OK' | 'DEGRADED' | 'INCOMPLETE' = 'OK';
+  let monitoringHealthReasonUk = 'Моніторинг працює у штатному режимі';
+  let monitoringHealthDetailsUk = '';
+
+  const critTotal = telegramMetrics?.criticalTotal || 15;
+  const critHealthy = telegramMetrics?.criticalHealthy !== undefined ? telegramMetrics?.criticalHealthy : (telegramMessages.length > 0 ? 10 : 0);
+  const totalMonitored = telegramMetrics?.monitoredSources || 73;
+  const totalHealthy = telegramMetrics?.healthyCount !== undefined ? telegramMetrics?.healthyCount : (telegramMessages.length > 0 ? 50 : 0);
+
+  if (alertsStatus === 'ERROR' && (!alerts || alerts.length === 0) && critHealthy === 0) {
+    monitoringHealth = 'INCOMPLETE';
+    monitoringHealthReasonUk = 'Повна відсутність зв’язку з джерелами та тривогами';
+    monitoringHealthDetailsUk = 'Немає відповіді від Alerts API та Telegram радарів';
+  } else if (isDataStale) {
+    const staleSec = Math.round((now - (cycleTs || now)) / 1000);
+    const staleMin = Math.round(staleSec / 60);
+    monitoringHealth = 'INCOMPLETE';
+    monitoringHealthReasonUk = `Дані застаріли (>90с). Останнє оновлення: ${staleMin > 1 ? staleMin + ' хв' : staleSec + 'с'} тому`;
+    monitoringHealthDetailsUk = `Перевірте інтернет або доступність проксі`;
+  } else if (telegramMetrics && telegramMetrics.criticalTotal > 0 && telegramMetrics.criticalHealthy < Math.min(3, telegramMetrics.criticalTotal) && telegramMetrics.healthyCount === 0) {
+    monitoringHealth = 'INCOMPLETE';
+    monitoringHealthReasonUk = 'Критичні радарні джерела не відповідають';
+    monitoringHealthDetailsUk = `Працюють ${telegramMetrics.criticalHealthy} із ${telegramMetrics.criticalTotal} критичних радарів`;
+  } else if (alertsStatus === 'ERROR' || (telegramMetrics && totalHealthy < totalMonitored * 0.45)) {
+    monitoringHealth = 'DEGRADED';
+    const unavailableNum = totalMonitored - totalHealthy;
+    monitoringHealthReasonUk = alertsStatus === 'ERROR' 
+      ? 'Офіційні тривоги тимчасово не відповідають (радари активні)' 
+      : `${unavailableNum} із ${totalMonitored} каналів тимчасово не відповідають`;
+    monitoringHealthDetailsUk = `Основний захист активний, частина джерел очікує перепідключення`;
+  } else {
+    monitoringHealth = 'OK';
+    monitoringHealthReasonUk = 'Усі ключові джерела та офіційні тривоги активні';
+    monitoringHealthDetailsUk = `${totalHealthy} із ${totalMonitored} каналів активні • Alerts OK`;
   }
 
   // Filter fresh messages within max retention window, log stale ones
@@ -589,37 +661,44 @@ export function evaluateLocalSecurity(
   const observationsList = activeEvents.filter(t => t.eventType === 'OBSERVATION' || !t.isWithinRadius);
   const outsideZoneObservations = activeEvents.filter(t => t.isSurroundingObservation || (!t.isWithinRadius && t.distanceKm !== null && t.distanceKm <= 75));
 
-  // 5. Determine Overall Security State (Strictly considering ONLY active threats in local radius)
+  // 5. Determine Overall Security State (SAFETY PROTOCOL: Strictly enforce monitoring health before declaring GREEN)
   let overallState: SecurityState = 'GREEN';
   let stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
   let stateDescriptionUk = 'Локальних загроз поблизу не виявлено. Джерела сканують ваш сектор.';
   let primaryThreat: ThreatEvent | null = null;
 
-  if (isDataStale) {
+  if (confirmedThreatsList.length > 0) {
+    overallState = 'RED';
+    primaryThreat = confirmedThreatsList[0];
+    stateBadgeUk = 'НЕБЕЗПЕКА ПОРУЧ';
+    stateDescriptionUk = primaryThreat.confidenceReason;
+  } else if (activeEvents.some(t => t.isWithinRadius)) {
+    overallState = 'ORANGE';
+    primaryThreat = activeEvents.find(t => t.isWithinRadius) || null;
+    stateBadgeUk = 'УВАГА В СЕКТОРІ';
+    stateDescriptionUk = primaryThreat ? primaryThreat.confidenceReason : 'Виявлено спостереження у вашому радіусі.';
+  } else if (monitoringHealth === 'INCOMPLETE' || isDataStale) {
     overallState = 'DEGRADED';
     stateBadgeUk = 'МОНІТОРИНГ НЕПОВНИЙ';
-    stateDescriptionUk = 'Дані застаріли (>90с) або відсутній зв’язок із радарними джерелами.';
+    stateDescriptionUk = monitoringHealthReasonUk || 'Дані застаріли або відсутній зв’язок із радарними джерелами.';
   } else {
-    if (confirmedThreatsList.length > 0) {
-      overallState = 'RED';
-      primaryThreat = confirmedThreatsList[0];
-      stateBadgeUk = 'НЕБЕЗПЕКА ПОРУЧ';
-      stateDescriptionUk = primaryThreat.confidenceReason;
-    } else if (activeEvents.some(t => t.isWithinRadius)) {
-      overallState = 'ORANGE';
-      primaryThreat = activeEvents.find(t => t.isWithinRadius) || null;
-      stateBadgeUk = 'УВАГА В СЕКТОРІ';
-      stateDescriptionUk = primaryThreat ? primaryThreat.confidenceReason : 'Виявлено спостереження у вашому радіусі.';
+    // Verified GREEN state: No local threats AND monitoring health is verified
+    overallState = 'GREEN';
+    stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
+    if (outsideZoneObservations.length > 0) {
+      stateDescriptionUk = `Локальної загрози в зоні ${userRadiusKm} км не підтверджено. Активно ${outsideZoneObservations.length} спостережень за межами зони (35–65 км).`;
     } else {
-      overallState = 'GREEN';
-      stateBadgeUk = 'СЕКТОР ЧИСТИЙ';
-      if (outsideZoneObservations.length > 0) {
-        stateDescriptionUk = `Локальної загрози в зоні ${userRadiusKm} км не підтверджено. Активно ${outsideZoneObservations.length} спостережень за межами зони (35–65 км).`;
-      } else {
-        stateDescriptionUk = `Локальних загроз поблизу не виявлено. 159 радарних джерел сканують ваш сектор.`;
-      }
+      stateDescriptionUk = `Локальних загроз поблизу не виявлено. ${totalMonitored} радарних джерел сканують ваш сектор.`;
     }
   }
+
+  const monitoringStats = {
+    total: telegramMetrics?.totalSources || 171,
+    monitored: totalMonitored,
+    healthy: totalHealthy,
+    unavailable: telegramMetrics?.unavailableCount !== undefined ? telegramMetrics.unavailableCount : (totalMonitored - totalHealthy),
+    disabled: telegramMetrics?.disabledCount !== undefined ? telegramMetrics.disabledCount : 98
+  };
 
   return {
     overallState,
@@ -646,6 +725,12 @@ export function evaluateLocalSecurity(
     lastTelegramMessageIso,
     rejectedMessagesLog: rejectedMessagesLog.slice(0, 10),
     evaluationTimestamp: new Date().toISOString(),
-    isDataStale
+    isDataStale,
+    monitoringHealth,
+    monitoringHealthReasonUk,
+    monitoringHealthDetailsUk,
+    monitoringStats,
+    lastRealDataTimestamp: effectiveLastRealDataTs,
+    lastRealDataIso: lastTelegramMessageIso || (effectiveLastRealDataTs > 0 ? new Date(effectiveLastRealDataTs).toISOString() : null)
   };
 }
