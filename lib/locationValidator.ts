@@ -66,10 +66,17 @@ const UKRAINE_BOUNDS = {
 };
 
 // Kinematic limits for civil transport in Ukraine
+// Kinematic limits for civil transport in Ukraine
 const MAX_PLAUSIBLE_SPEED_KMH = 180;  // Standard highway car / high-speed rail speed
 const EXTREME_SPEED_LIMIT_KMH = 260;  // Extreme upper threshold (e.g. intercity express)
 const MIN_SAMPLES_FOR_WARMUP = 3;     // Minimum samples to establish initial trusted location
 const WARMUP_TIME_WINDOW_MS = 6000;   // Max time window to collect warmup samples
+
+// Hysteresis & Expiration parameters for anomaly handling
+export const ANOMALY_HYSTERESIS_THRESHOLD = 2;   // Consecutive bad fixes required before marking UNRELIABLE
+export const RECOVERY_HYSTERESIS_THRESHOLD = 2;  // Consecutive stable fixes required to recover to VERIFIED
+export const ANOMALY_EXPIRATION_WINDOW_MS = 35000; // 35 seconds without new anomalies -> stale warning expires
+export const MAX_STABLE_ACCURACY_METERS = 80;    // Maximum accuracy (m) to consider a fix normal/stable
 
 export class LocationValidator {
   private currentTrusted: TrustedLocation | null = null;
@@ -77,12 +84,24 @@ export class LocationValidator {
   private isWarmupComplete = false;
   private lockMode: LocationLockMode = 'AUTO';
   private consecutiveAnomalies = 0;
+  private consecutiveValidSamples = 0;
+  private lastAnomalyTimestamp = 0;
+  private recentValidBuffer: RawGpsMeasurement[] = [];
 
   constructor(initialLocation?: TrustedLocation | null, lockMode: LocationLockMode = 'AUTO') {
     if (initialLocation) {
-      this.currentTrusted = { ...initialLocation };
-      this.lockMode = initialLocation.lockMode || lockMode;
-      this.isWarmupComplete = initialLocation.confidenceState === 'VERIFIED' || initialLocation.confidenceState === 'LOCKED';
+      // Clean up stale anomaly from saved state so warning does not stick across reloads
+      const cleanedLocation = { ...initialLocation };
+      if (cleanedLocation.confidenceState === 'UNRELIABLE') {
+        cleanedLocation.confidenceState = cleanedLocation.lockMode === 'LOCKED' || cleanedLocation.lockMode === 'MANUAL' ? 'LOCKED' : 'VERIFIED';
+        cleanedLocation.statusMessageUk = `📍 ${cleanedLocation.name}`;
+        cleanedLocation.subStatusUk = cleanedLocation.confidenceState === 'LOCKED' ? 'Локацію зафіксовано' : `GPS ±${Math.round(cleanedLocation.accuracyMeters || 10)} м`;
+        cleanedLocation.anomalyReasonUk = undefined;
+        cleanedLocation.systemConfidenceScore = 90;
+      }
+      this.currentTrusted = cleanedLocation;
+      this.lockMode = cleanedLocation.lockMode || lockMode;
+      this.isWarmupComplete = cleanedLocation.confidenceState === 'VERIFIED' || cleanedLocation.confidenceState === 'LOCKED';
     } else {
       this.lockMode = lockMode;
       this.isWarmupComplete = false;
@@ -101,9 +120,40 @@ export class LocationValidator {
     return this.isWarmupComplete;
   }
 
+  /**
+   * Check and expire stale anomaly warning if enough time has elapsed without new anomalies.
+   * Prevents warning from remaining stuck indefinitely due to a single old bad fix.
+   */
+  public checkAnomalyExpiration(now: number = Date.now()): boolean {
+    if (!this.currentTrusted || this.currentTrusted.confidenceState !== 'UNRELIABLE') {
+      return false;
+    }
+
+    if (this.lastAnomalyTimestamp > 0 && now - this.lastAnomalyTimestamp > ANOMALY_EXPIRATION_WINDOW_MS) {
+      this.consecutiveAnomalies = 0;
+      this.lastAnomalyTimestamp = 0;
+      this.consecutiveValidSamples = 0;
+      this.currentTrusted = {
+        ...this.currentTrusted,
+        confidenceState: this.currentTrusted.lockMode === 'LOCKED' || this.currentTrusted.lockMode === 'MANUAL' ? 'LOCKED' : 'VERIFIED',
+        statusMessageUk: `📍 ${this.currentTrusted.name}`,
+        subStatusUk: `GPS ±${Math.round(this.currentTrusted.accuracyMeters)} м`,
+        anomalyReasonUk: undefined,
+        systemConfidenceScore: 90,
+      };
+      return true;
+    }
+
+    return false;
+  }
+
   public setLockMode(mode: LocationLockMode): TrustedLocation | null {
     this.lockMode = mode;
     if (!this.currentTrusted) return null;
+
+    this.consecutiveAnomalies = 0;
+    this.consecutiveValidSamples = 0;
+    this.lastAnomalyTimestamp = 0;
 
     if (mode === 'LOCKED') {
       this.isWarmupComplete = true;
@@ -113,7 +163,7 @@ export class LocationValidator {
         confidenceState: 'LOCKED',
         isManualOrLocked: true,
         statusMessageUk: `📌 ${this.currentTrusted.name}`,
-        subStatusUk: 'Локацію зафіксовано (Захист від РЕБ)',
+        subStatusUk: 'Локацію зафіксовано',
         anomalyReasonUk: undefined,
       };
     } else if (mode === 'MANUAL') {
@@ -136,6 +186,7 @@ export class LocationValidator {
         isManualOrLocked: false,
         statusMessageUk: `📍 ${this.currentTrusted.name}`,
         subStatusUk: `GPS ±${Math.round(this.currentTrusted.accuracyMeters)} м`,
+        anomalyReasonUk: undefined,
       };
       this.sampleBuffer = [];
     }
@@ -156,6 +207,9 @@ export class LocationValidator {
     this.isWarmupComplete = true;
     this.sampleBuffer = [];
     this.consecutiveAnomalies = 0;
+    this.consecutiveValidSamples = 0;
+    this.lastAnomalyTimestamp = 0;
+    this.recentValidBuffer = [];
 
     const newTrusted: TrustedLocation = {
       lat,
@@ -170,7 +224,7 @@ export class LocationValidator {
       firstAcquiredTimestamp: now,
       sampleCount: 1,
       statusMessageUk: `📌 ${resolvedName}`,
-      subStatusUk: 'Локацію встановлено вручну (Захист від РЕБ)',
+      subStatusUk: 'Локацію встановлено вручну',
       isManualOrLocked: true,
     };
 
@@ -217,6 +271,9 @@ export class LocationValidator {
       }
     }
 
+    // Check if any old anomaly warning has expired due to elapsed time
+    this.checkAnomalyExpiration(now);
+
     // 2. SANITY CHECK: Ukraine territory bounds check
     const isInsideUkraine =
       measurement.lat >= UKRAINE_BOUNDS.minLat &&
@@ -227,25 +284,39 @@ export class LocationValidator {
 
     if (!isInsideUkraine) {
       this.consecutiveAnomalies++;
-      const reason = `Координати (${measurement.lat.toFixed(2)}, ${measurement.lng.toFixed(2)}) за межами України (ймовірний РЕБ-спуфінг)`;
+      this.consecutiveValidSamples = 0;
+      this.recentValidBuffer = [];
+      this.lastAnomalyTimestamp = now;
+      const reason = `Координати (${measurement.lat.toFixed(2)}, ${measurement.lng.toFixed(2)}) за межами України (аномалія GPS)`;
 
       if (this.currentTrusted) {
-        this.currentTrusted = {
-          ...this.currentTrusted,
-          confidenceState: 'UNRELIABLE',
-          systemConfidenceScore: Math.max(10, this.currentTrusted.systemConfidenceScore - 30),
-          statusMessageUk: '⚠️ Геолокація нестабільна (РЕБ)',
-          subStatusUk: `Використовується остання підтверджена позиція (${this.currentTrusted.name.split(' (')[0]})`,
-          anomalyReasonUk: reason,
-          rawGpsSample: measurement,
-        };
-        return {
-          trustedLocation: this.currentTrusted,
-          isUpdated: false,
-          isAnomalous: true,
-          confidenceState: 'UNRELIABLE',
-          anomalyReasonUk: reason,
-        };
+        if (this.consecutiveAnomalies >= ANOMALY_HYSTERESIS_THRESHOLD) {
+          this.currentTrusted = {
+            ...this.currentTrusted,
+            confidenceState: 'UNRELIABLE',
+            systemConfidenceScore: Math.max(10, this.currentTrusted.systemConfidenceScore - 30),
+            statusMessageUk: '⚠️ Геолокація нестабільна',
+            subStatusUk: `Використовується остання підтверджена позиція (${this.currentTrusted.name.split(' (')[0]})`,
+            anomalyReasonUk: reason,
+            rawGpsSample: measurement,
+          };
+          return {
+            trustedLocation: this.currentTrusted,
+            isUpdated: false,
+            isAnomalous: true,
+            confidenceState: 'UNRELIABLE',
+            anomalyReasonUk: reason,
+          };
+        } else {
+          // Hysteresis: 1st anomaly discarded, retain trusted location without marking UNRELIABLE
+          return {
+            trustedLocation: this.currentTrusted,
+            isUpdated: false,
+            isAnomalous: true,
+            confidenceState: this.currentTrusted.confidenceState,
+            anomalyReasonUk: reason,
+          };
+        }
       } else {
         // Fallback to Kyiv center if no previous location exists
         const fallback = this.setManualLocation(50.4501, 30.5234, 'Київ (Центр)', 'Київська область');
@@ -372,30 +443,75 @@ export class LocationValidator {
 
     if (isImpossibleSpeed || isSuddenFarJump || isExcessiveInaccuracy) {
       this.consecutiveAnomalies++;
-      const reason = `Виявлено аномальний стрибок: ${distKm.toFixed(1)} км за ${Math.round(timeDeltaSec)}с (${Math.round(speedKmh)} км/год). Можлива дія РЕБ.`;
+      this.consecutiveValidSamples = 0;
+      this.recentValidBuffer = [];
+      this.lastAnomalyTimestamp = now;
+      const reason = `Виявлено аномальний стрибок: ${distKm.toFixed(1)} км за ${Math.round(timeDeltaSec)}с (${Math.round(speedKmh)} км/год). Нестабільний сигнал GPS.`;
 
-      // CRITICAL: DO NOT MOVE TRUSTED LOCATION! Retain last confirmed location
-      this.currentTrusted = {
-        ...this.currentTrusted,
-        confidenceState: 'UNRELIABLE',
-        systemConfidenceScore: Math.max(15, this.currentTrusted.systemConfidenceScore - 25),
-        statusMessageUk: '⚠️ Геолокація нестабільна (РЕБ)',
-        subStatusUk: `Використовується остання підтверджена позиція (${this.currentTrusted.name.split(' (')[0]})`,
-        anomalyReasonUk: reason,
-        rawGpsSample: measurement,
-      };
+      // Hysteresis: only mark UNRELIABLE after consecutive bad measurements
+      if (this.consecutiveAnomalies >= ANOMALY_HYSTERESIS_THRESHOLD) {
+        // CRITICAL: DO NOT MOVE TRUSTED LOCATION! Retain last confirmed location
+        this.currentTrusted = {
+          ...this.currentTrusted,
+          confidenceState: 'UNRELIABLE',
+          systemConfidenceScore: Math.max(15, this.currentTrusted.systemConfidenceScore - 25),
+          statusMessageUk: '⚠️ Геолокація нестабільна',
+          subStatusUk: `Використовується остання підтверджена позиція (${this.currentTrusted.name.split(' (')[0]})`,
+          anomalyReasonUk: reason,
+          rawGpsSample: measurement,
+        };
 
-      return {
-        trustedLocation: this.currentTrusted,
-        isUpdated: false,
-        isAnomalous: true,
-        confidenceState: 'UNRELIABLE',
-        anomalyReasonUk: reason,
-      };
+        return {
+          trustedLocation: this.currentTrusted,
+          isUpdated: false,
+          isAnomalous: true,
+          confidenceState: 'UNRELIABLE',
+          anomalyReasonUk: reason,
+        };
+      } else {
+        // First anomaly: discard fix, preserve trusted location without marking UNRELIABLE
+        return {
+          trustedLocation: this.currentTrusted,
+          isUpdated: false,
+          isAnomalous: true,
+          confidenceState: this.currentTrusted.confidenceState,
+          anomalyReasonUk: reason,
+        };
+      }
     }
 
-    // CHECK B: Real plausible movement (e.g. driving a car or walking)
+    // CHECK B: Real plausible movement & recovery from unstable state
     this.consecutiveAnomalies = 0;
+    this.consecutiveValidSamples++;
+    this.recentValidBuffer.push(measurement);
+    if (this.recentValidBuffer.length > 5) {
+      this.recentValidBuffer.shift();
+    }
+
+    const isAccuracyNormal = measurement.accuracy <= MAX_STABLE_ACCURACY_METERS;
+    const wasUnreliable = this.currentTrusted.confidenceState === 'UNRELIABLE';
+
+    // If previously UNRELIABLE, require consecutive stable samples to recover (hysteresis)
+    if (wasUnreliable) {
+      const isClusterConsistent = this.validateSampleCluster(
+        this.recentValidBuffer.slice(-RECOVERY_HYSTERESIS_THRESHOLD),
+        250
+      );
+
+      if (this.consecutiveValidSamples < RECOVERY_HYSTERESIS_THRESHOLD || !isAccuracyNormal || !isClusterConsistent) {
+        // Still stabilizing: continue monitoring from trusted location, keep UNRELIABLE warning
+        return {
+          trustedLocation: this.currentTrusted,
+          isUpdated: false,
+          isAnomalous: false,
+          confidenceState: 'UNRELIABLE',
+        };
+      }
+
+      // Recovered! Multiple consecutive stable measurements agree with normal accuracy -> clear warning
+      this.lastAnomalyTimestamp = 0;
+    }
+
     const nearest = findNearestLocation(measurement.lat, measurement.lng);
 
     // Compute System Confidence Score:
@@ -468,8 +584,16 @@ export function loadTrustedLocationFromStorage(): TrustedLocation | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed as TrustedLocation;
+    const parsed = JSON.parse(raw) as TrustedLocation;
+    // CRITICAL: Do NOT restore stale anomaly warning across app reloads/restarts
+    if (parsed && parsed.confidenceState === 'UNRELIABLE') {
+      parsed.confidenceState = parsed.lockMode === 'LOCKED' || parsed.lockMode === 'MANUAL' ? 'LOCKED' : 'VERIFIED';
+      parsed.statusMessageUk = `📍 ${parsed.name}`;
+      parsed.subStatusUk = parsed.confidenceState === 'LOCKED' ? 'Локацію зафіксовано' : `GPS ±${Math.round(parsed.accuracyMeters || 10)} м`;
+      parsed.anomalyReasonUk = undefined;
+      parsed.systemConfidenceScore = 90;
+    }
+    return parsed;
   } catch (e) {
     console.warn('Failed to load trusted location from localStorage:', e);
     return null;

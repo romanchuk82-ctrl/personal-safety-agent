@@ -70,7 +70,7 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     assert.strictEqual(degraded.isAnomalous, false, 'Gradual degradation in same area is not an instant EW teleport anomaly');
   });
 
-  await t.test('Сценарій C: Раптовий стрибок на сотні кілометрів (РЕБ / GPS Spoofing Jump)', () => {
+  await t.test('Сценарій C: Стрибок координат та гістерезис (Hysteresis & Neutral Anomaly)', () => {
     const validator = new LocationValidator(null, 'AUTO');
     const baseTime = 1700000000000;
 
@@ -79,23 +79,37 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime + 1000 });
     validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime + 2000 });
 
-    // Sudden massive EW jump 450 km away after 3 seconds with false claimed accuracy 5m!
-    const spoofResult = validator.processGpsMeasurement({
+    // 1-й аномальний вимір (стрибок 450 км)
+    const spoof1 = validator.processGpsMeasurement({
       lat: RANDOM_SPOOF.lat,
       lng: RANDOM_SPOOF.lng,
-      accuracy: 5, // False nominal accuracy from spoofed signal!
+      accuracy: 5,
       timestamp: baseTime + 5000
     });
 
-    assert.strictEqual(spoofResult.isAnomalous, true, 'Must detect anomaly');
-    assert.strictEqual(spoofResult.isUpdated, false, 'Must NOT update trusted location');
-    assert.strictEqual(spoofResult.confidenceState, 'UNRELIABLE', 'Status must be UNRELIABLE');
-    assert.strictEqual(spoofResult.trustedLocation.name.includes('Бориспіль'), true, 'Monitoring location MUST REMAIN in Boryspil');
-    assert.strictEqual(spoofResult.trustedLocation.statusMessageUk.includes('Геолокація нестабільна'), true);
-    assert.strictEqual(spoofResult.anomalyReasonUk?.includes('аномальний стрибок'), true);
+    assert.strictEqual(spoof1.isAnomalous, true, 'Повинен виявити аномалію');
+    assert.strictEqual(spoof1.isUpdated, false, 'Не повинен оновлювати позицію моніторингу');
+    assert.notStrictEqual(spoof1.confidenceState, 'UNRELIABLE', 'Поодинокий глітч через гістерезис ще не переводить у UNRELIABLE');
+    assert.strictEqual(spoof1.trustedLocation.name.includes('Бориспіль'), true, 'Моніторинг залишається в Борисполі');
+
+    // 2-й послідовний аномальний вимір -> поріг гістерезису досягнуто!
+    const spoof2 = validator.processGpsMeasurement({
+      lat: RANDOM_SPOOF.lat + 0.001,
+      lng: RANDOM_SPOOF.lng + 0.001,
+      accuracy: 6,
+      timestamp: baseTime + 6000
+    });
+
+    assert.strictEqual(spoof2.isAnomalous, true);
+    assert.strictEqual(spoof2.isUpdated, false);
+    assert.strictEqual(spoof2.confidenceState, 'UNRELIABLE', 'Після 2-ї аномалії поспіль статус стає UNRELIABLE');
+    assert.strictEqual(spoof2.trustedLocation.statusMessageUk, '⚠️ Геолокація нестабільна');
+    assert.strictEqual(spoof2.trustedLocation.statusMessageUk.includes('РЕБ'), false, 'Ніяких згадок РЕБ без зовнішнього підтвердження');
+    assert.strictEqual(spoof2.anomalyReasonUk?.includes('РЕБ'), false, 'Причина не повинна стверджувати про РЕБ');
+    assert.strictEqual(spoof2.trustedLocation.subStatusUk.includes('Остання підтверджена позиція') || spoof2.trustedLocation.subStatusUk.includes('Бориспіль'), true);
   });
 
-  await t.test('Сценарій D: Кілька суперечливих хаотичних координат під час роботи РЕБ', () => {
+  await t.test('Сценарій D: Кілька суперечливих хаотичних координат', () => {
     const validator = new LocationValidator(null, 'AUTO');
     const baseTime = 1700000000000;
 
@@ -109,9 +123,10 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     assert.strictEqual(c1.isAnomalous, true);
     assert.strictEqual(c1.trustedLocation.name.includes('Бориспіль'), true);
 
-    // Chaotic coordinates 2 (Kharkiv area)
+    // Chaotic coordinates 2 (Kharkiv area) -> 2nd anomaly, triggers UNRELIABLE
     const c2 = validator.processGpsMeasurement({ lat: 49.99, lng: 36.23, accuracy: 15, timestamp: baseTime + 5000 });
     assert.strictEqual(c2.isAnomalous, true);
+    assert.strictEqual(c2.confidenceState, 'UNRELIABLE');
     assert.strictEqual(c2.trustedLocation.name.includes('Бориспіль'), true);
 
     // Chaotic coordinates 3 (Out of Ukraine territory)
@@ -120,7 +135,7 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     assert.strictEqual(c3.trustedLocation.name.includes('Бориспіль'), true);
   });
 
-  await t.test('Сценарій E: GPS повертається до нормального стану (Boryspil recovery)', () => {
+  await t.test('Сценарій E: Відновлення за гістерезисом (Recovery after consecutive stable samples)', () => {
     const validator = new LocationValidator(null, 'AUTO');
     const baseTime = 1700000000000;
 
@@ -129,22 +144,33 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime + 1000 });
     validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime + 2000 });
 
-    // EW Spoofing occurs
-    validator.processGpsMeasurement({ lat: RANDOM_SPOOF.lat, lng: RANDOM_SPOOF.lng, accuracy: 5, timestamp: baseTime + 4000 });
+    // 2 Anomalies to trigger UNRELIABLE
+    validator.processGpsMeasurement({ lat: RANDOM_SPOOF.lat, lng: RANDOM_SPOOF.lng, accuracy: 5, timestamp: baseTime + 3000 });
+    validator.processGpsMeasurement({ lat: RANDOM_SPOOF.lat + 0.01, lng: RANDOM_SPOOF.lng + 0.01, accuracy: 5, timestamp: baseTime + 4000 });
     assert.strictEqual(validator.getTrustedLocation()?.confidenceState, 'UNRELIABLE');
 
-    // Real signal in Boryspil returns!
-    const recovered = validator.processGpsMeasurement({
+    // 1-й стабільний сигнал у Борисполі (ще не знімає warning остаточно)
+    const sample1 = validator.processGpsMeasurement({
       lat: BORYSPIL.lat + 0.0001,
       lng: BORYSPIL.lng + 0.0001,
       accuracy: 10,
-      timestamp: baseTime + 8000
+      timestamp: baseTime + 6000
+    });
+    assert.strictEqual(sample1.isAnomalous, false);
+    assert.strictEqual(sample1.confidenceState, 'UNRELIABLE', '1 стабільний вимір ще стабілізується');
+
+    // 2-й стабільний узгоджений сигнал у Борисполі -> АВТОМАТИЧНЕ ВІДНОВЛЕННЯ!
+    const sample2 = validator.processGpsMeasurement({
+      lat: BORYSPIL.lat + 0.00015,
+      lng: BORYSPIL.lng + 0.00012,
+      accuracy: 10,
+      timestamp: baseTime + 7000
     });
 
-    assert.strictEqual(recovered.isAnomalous, false);
-    assert.strictEqual(recovered.confidenceState, 'VERIFIED', 'Should recover to VERIFIED');
-    assert.strictEqual(recovered.trustedLocation.name.includes('Бориспіль'), true);
-    assert.strictEqual(recovered.trustedLocation.statusMessageUk.includes('Бориспіль'), true);
+    assert.strictEqual(sample2.isAnomalous, false);
+    assert.strictEqual(sample2.confidenceState, 'VERIFIED', '2 послідовні узгоджені виміри знімають warning');
+    assert.strictEqual(sample2.trustedLocation.name.includes('Бориспіль'), true);
+    assert.strictEqual(sample2.trustedLocation.statusMessageUk.includes('Бориспіль'), true);
   });
 
   await t.test('Сценарій F: Користувач реально їде автомобілем (Kyiv -> Boryspil at 80 km/h)', () => {
@@ -229,6 +255,59 @@ test('Location Confidence & Validation Layer (EW / GPS Spoofing Defense)', async
     assert.strictEqual(validator2.getLockMode(), 'MANUAL');
     assert.strictEqual(validator2.getTrustedLocation()?.name, 'Бориспіль / Аеропорт');
     assert.strictEqual(validator2.getTrustedLocation()?.confidenceState, 'LOCKED');
+  });
+
+  await t.test('Сценарій J: Автоматичне зняття warning за таймаутом (Stale Anomaly Expiration)', () => {
+    const validator = new LocationValidator(null, 'AUTO');
+    const baseTime = 1700000000000;
+
+    // Warmup in Boryspil
+    validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime });
+    validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime + 1000 });
+    validator.processGpsMeasurement({ lat: BORYSPIL.lat, lng: BORYSPIL.lng, accuracy: 10, timestamp: baseTime + 2000 });
+
+    // 2 anomalies trigger UNRELIABLE
+    validator.processGpsMeasurement({ lat: RANDOM_SPOOF.lat, lng: RANDOM_SPOOF.lng, accuracy: 5, timestamp: baseTime + 3000 });
+    validator.processGpsMeasurement({ lat: RANDOM_SPOOF.lat + 0.01, lng: RANDOM_SPOOF.lng + 0.01, accuracy: 5, timestamp: baseTime + 4000 });
+    assert.strictEqual(validator.getTrustedLocation()?.confidenceState, 'UNRELIABLE');
+
+    // 10 seconds later: still within expiration window -> not expired yet
+    const expiredEarly = validator.checkAnomalyExpiration(baseTime + 14000);
+    assert.strictEqual(expiredEarly, false);
+    assert.strictEqual(validator.getTrustedLocation()?.confidenceState, 'UNRELIABLE');
+
+    // 40 seconds later without new anomalies -> EXPIRED!
+    const expired = validator.checkAnomalyExpiration(baseTime + 45000);
+    assert.strictEqual(expired, true, 'Застаріла аномалія повинна автоматично експірувати');
+    assert.strictEqual(validator.getTrustedLocation()?.confidenceState, 'VERIFIED');
+    assert.strictEqual(validator.getTrustedLocation()?.statusMessageUk.includes('Бориспіль'), true);
+  });
+
+  await t.test('Сценарій K: Очищення старого аномального fix при ініціалізації зі сховища', () => {
+    const staleData: TrustedLocation = {
+      lat: BORYSPIL.lat,
+      lng: BORYSPIL.lng,
+      accuracyMeters: 10,
+      name: 'Бориспіль / Аеропорт',
+      oblast: 'Київська область',
+      confidenceState: 'UNRELIABLE',
+      lockMode: 'AUTO',
+      systemConfidenceScore: 20,
+      lastVerifiedTimestamp: 1700000000000,
+      firstAcquiredTimestamp: 1700000000000,
+      sampleCount: 5,
+      statusMessageUk: '⚠️ Геолокація нестабільна',
+      subStatusUk: 'Остання підтверджена позиція',
+      isManualOrLocked: false,
+    };
+
+    const validator = new LocationValidator(staleData, 'AUTO');
+    const restored = validator.getTrustedLocation()!;
+
+    assert.strictEqual(restored.confidenceState, 'VERIFIED', 'Не залишає warning активним через старий аномальний fix зі сховища');
+    assert.strictEqual(restored.name, 'Бориспіль / Аеропорт');
+    assert.strictEqual(restored.statusMessageUk.includes('Бориспіль'), true);
+    assert.strictEqual(restored.anomalyReasonUk, undefined);
   });
 
 });

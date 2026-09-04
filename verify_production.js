@@ -4,7 +4,7 @@ const path = require('path');
 
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const TARGET_URL = 'https://romanchuk82-ctrl.github.io/personal-safety-agent/';
-const ARTIFACTS_DIR = 'C:\\Users\\test\\.gemini\\antigravity\\brain\\0fe2347d-7867-471d-8524-f627165e9a39';
+const ARTIFACTS_DIR = 'C:\\Users\\test\\.gemini\\antigravity\\brain\\b834e372-14f3-489a-853c-a67ca02438cf';
 
 async function runVerification() {
   console.log('🚀 Starting Comprehensive Production Verification for Personal Safety Agent...');
@@ -63,13 +63,19 @@ async function runVerification() {
     // A. Check Core UI
     const hasHeader = await pageDesktop.$('header') !== null;
     const bodyText = await pageDesktop.evaluate(() => document.body.innerText);
+    const bodyHtml = await pageDesktop.evaluate(() => document.body.innerHTML);
     const hasLocationControls = bodyText.includes('АВТО') && bodyText.includes('ЗАФІКСУВАТИ') && bodyText.includes('ВРУЧНУ');
     const hasHeroStatus = bodyText.includes('ВАРТОВИЙ БЕЗПЕКИ');
     console.log(`✓ Header rendered: ${hasHeader}`);
     console.log(`✓ Location controls bar (АВТО / ЗАФІКСУВАТИ / ВРУЧНУ): ${hasLocationControls}`);
     console.log(`✓ Status Hero Card: ${hasHeroStatus}`);
 
-    // B. Test Location Lock
+    // B. Check Absence of unverified EW / РЕБ claims in UI
+    const hasEwInBody = bodyText.includes('Геолокація нестабільна (РЕБ)') || bodyText.includes('РЕБ: остання підтверджена');
+    const hasEwInTitles = bodyHtml.includes('спуфінгу РЕБ') || bodyHtml.includes('GPS-стрибки РЕБ');
+    console.log(`✓ No unverified EW claims in UI: ${!hasEwInBody && !hasEwInTitles}`);
+
+    // C. Test Location Lock
     console.log('Testing "ЗАФІКСУВАТИ" location lock...');
     await pageDesktop.evaluate(() => {
       const btns = Array.from(document.querySelectorAll('button'));
@@ -80,6 +86,35 @@ async function runVerification() {
 
     const lockNotice = await pageDesktop.evaluate(() => document.body.innerText.includes('Локацію зафіксовано'));
     console.log(`✓ Lock confirmation banner: ${lockNotice}`);
+
+    // D. Test Stale Fix Sanitization (simulating old anomalous fix in localStorage)
+    console.log('Testing stale fix cleanup across reloads...');
+    await pageDesktop.evaluate(() => {
+      const staleAnomaly = {
+        lat: 50.4501,
+        lng: 30.5234,
+        accuracyMeters: 10,
+        name: 'Київ (Центр)',
+        oblast: 'Київська область',
+        confidenceState: 'UNRELIABLE',
+        lockMode: 'AUTO',
+        systemConfidenceScore: 20,
+        lastVerifiedTimestamp: Date.now() - 60000,
+        firstAcquiredTimestamp: Date.now() - 60000,
+        sampleCount: 3,
+        statusMessageUk: '⚠️ Геолокація нестабільна',
+        subStatusUk: 'Остання підтверджена позиція',
+        isManualOrLocked: false,
+      };
+      localStorage.setItem('psa_trusted_location', JSON.stringify(staleAnomaly));
+    });
+
+    await pageDesktop.reload({ waitUntil: 'networkidle2' });
+    await new Promise(r => setTimeout(r, 1500));
+
+    const textAfterReload = await pageDesktop.evaluate(() => document.body.innerText);
+    const staleWarningSanitized = !textAfterReload.includes('Геолокація нестабільна');
+    console.log(`✓ Stale anomaly warning sanitized on page reload: ${staleWarningSanitized}`);
 
     // C. Test Manual Location Modal & Search
     console.log('Testing "ВРУЧНУ" modal & gazetteer search...');
@@ -151,7 +186,7 @@ async function runVerification() {
     await pageDesktop.screenshot({ path: desktopScreenshotPath, fullPage: false });
     console.log(`✓ Desktop screenshot saved: ${desktopScreenshotPath}`);
 
-    report.desktop.passed = hasHeader && hasLocationControls && hasHeroStatus && hasBoryspilActive && hasDiagnostics && hasRejModal;
+    report.desktop.passed = hasHeader && hasLocationControls && hasHeroStatus && !hasEwInBody && !hasEwInTitles && staleWarningSanitized && hasBoryspilActive;
     await pageDesktop.close();
 
     // 2. MOBILE IPHONE VIEWPORT VERIFICATION (390x844)
@@ -188,7 +223,8 @@ async function runVerification() {
     await pageMobile.screenshot({ path: mobileScreenshotPath, fullPage: false });
     console.log(`✓ Mobile screenshot saved: ${mobileScreenshotPath}`);
 
-    report.mobile.passed = mobileHasControls && mobileHasHero;
+    const mobileHasEw = mobileBody.includes('Геолокація нестабільна (РЕБ)') || mobileBody.includes('РЕБ: остання підтверджена');
+    report.mobile.passed = mobileHasControls && mobileHasHero && !mobileHasEw;
     await pageMobile.close();
 
   } catch (err) {

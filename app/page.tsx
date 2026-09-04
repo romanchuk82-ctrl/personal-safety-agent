@@ -225,6 +225,18 @@ export default function HomePage() {
         const secs = Math.floor((Date.now() - lastCheckTime.getTime()) / 1000);
         setSecondsSinceCheck(secs);
       }
+
+      // Automatically expire stale anomaly warning if enough time has elapsed
+      if (locationValidatorRef.current) {
+        const expired = locationValidatorRef.current.checkAnomalyExpiration();
+        if (expired) {
+          const fresh = locationValidatorRef.current.getTrustedLocation();
+          if (fresh) {
+            setTrustedLocation({ ...fresh });
+            saveTrustedLocationToStorage(fresh);
+          }
+        }
+      }
     }, 1000);
     return () => clearInterval(interval);
   }, [lastCheckTime]);
@@ -484,7 +496,7 @@ export default function HomePage() {
     if (autoLoc) {
       setTrustedLocation({ ...autoLoc });
       saveTrustedLocationToStorage(autoLoc);
-      setLocationSuccessNotice('📍 Увімкнено Авто-GPS з розумним захистом від РЕБ');
+      setLocationSuccessNotice('📍 Увімкнено Авто-GPS із захистом від аномалій координат');
       setTimeout(() => setLocationSuccessNotice(''), 3500);
 
       startContinuousGpsWatch();
@@ -672,7 +684,7 @@ export default function HomePage() {
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               )}
-              title="Автоматичний GPS з розумним захистом від спуфінгу РЕБ"
+              title="Автоматичний GPS із захистом від аномалій координат"
             >
               <Radio className="w-3.5 h-3.5 text-blue-300" />
               <span>📍 АВТО</span>
@@ -686,7 +698,7 @@ export default function HomePage() {
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               )}
-              title="Зафіксувати поточну точку: ігнорувати будь-які GPS-стрибки РЕБ"
+              title="Зафіксувати поточну точку: ігнорувати будь-які стрибки GPS"
             >
               <Lock className="w-3.5 h-3.5 text-indigo-300" />
               <span>📌 ЗАФІКСУВАТИ</span>
@@ -740,15 +752,15 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* EW / GPS SPOOFING WARNING CARD (Appears if suspicious GPS jump detected) */}
+        {/* GPS ANOMALY WARNING CARD (Appears if suspicious GPS jump detected) */}
         {isLocationUnreliable && (
           <div className="mb-4 bg-amber-950/90 border border-amber-500/80 rounded-2xl p-3.5 shadow-xl animate-fadeIn text-xs text-amber-200 space-y-2">
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-bounce" />
               <div>
-                <h3 className="font-bold text-amber-100 text-xs">⚠️ Геолокація нестабільна (РЕБ)</h3>
+                <h3 className="font-bold text-amber-100 text-xs">⚠️ Геолокація нестабільна</h3>
                 <p className="text-[11px] text-amber-300/90 mt-0.5 leading-relaxed">
-                  Виявлено різкий стрибок координат. Система автоматично зберегла останню надійну точку:{' '}
+                  Виявлено стрибок координат (можливий слабкий сигнал, multipath, indoor або інтерференція GNSS). Система використовує останню надійну точку:{' '}
                   <strong>{trustedLocation?.name}</strong>. Моніторинг загроз не переривається!
                 </p>
               </div>
@@ -835,7 +847,7 @@ export default function HomePage() {
                 <span className="font-bold text-white truncate block">{trustedLocation.name}</span>
                 <span className="text-[10px] text-slate-400 font-mono">
                   {isLocationUnreliable
-                    ? '⚠️ РЕБ: остання підтверджена'
+                    ? '⚠️ Остання підтверджена позиція'
                     : isLocationLocked
                     ? '📌 Зафіксовано користувачем'
                     : `GPS ±${Math.round(trustedLocation.accuracyMeters)}м`}
