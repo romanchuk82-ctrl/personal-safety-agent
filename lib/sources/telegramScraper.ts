@@ -961,8 +961,11 @@ export interface TelegramIngestMetrics {
   temporarilyUnavailableCount: number;
   removedUnusableCount: number;
   lastSuccessfulCycleTs: number;
+  lastSuccessfulCycleIso?: string;
   lastRealDataTimestamp: number;
   lastRealDataIso: string | null;
+  lastMessageTimestamp?: number;
+  lastMessageIso?: string | null;
   refreshDiagnostics?: RefreshDiagnostics;
 }
 
@@ -1396,8 +1399,11 @@ export async function fetchAllTelegramFeeds(
     temporarilyUnavailableCount: unavailableCount,
     removedUnusableCount: 98,
     lastSuccessfulCycleTs: lastKnownSuccessfulCycleTs || now,
+    lastSuccessfulCycleIso: (lastKnownSuccessfulCycleTs || now) ? new Date(lastKnownSuccessfulCycleTs || now).toISOString() : undefined,
     lastRealDataTimestamp: newestMessageTs,
-    lastRealDataIso: newestMessageIso
+    lastRealDataIso: newestMessageIso,
+    lastMessageTimestamp: newestMessageTs,
+    lastMessageIso: newestMessageIso
   };
 
   return { messages: allMessages, sourceStatus, metrics };
@@ -1547,4 +1553,12 @@ export function clusterTelegramMessages(messages: TelegramMessage[], timeWindowM
   }
 
   return clusters;
+}
+
+export function __resetTelegramScraperStateForTests(): void {
+  lastKnownSuccessfulCycleTs = 0;
+  rollingBatchIndex = 0;
+  for (const key of Object.keys(telegramCache)) {
+    delete telegramCache[key];
+  }
 }

@@ -71,6 +71,7 @@ import {
   saveTrustedLocationToStorage,
   loadTrustedLocationFromStorage
 } from '@/lib/locationValidator';
+import { formatTimeHHMMSS, formatAgeWithStaleWarningUk } from '@/lib/diagnosticsFormatters';
 
 const CITY_PRESETS = [
   // Київ та Столичний регіон
@@ -104,6 +105,11 @@ export default function HomePage() {
   const [trustedLocation, setTrustedLocation] = useState<TrustedLocation | null>(null);
   const [radiusKm, setRadiusKm] = useState<number>(15.0);
   const [lastCheckTime, setLastCheckTime] = useState<Date | null>(null);
+  const [lastFullSyncTime, setLastFullSyncTime] = useState<Date | null>(null);
+  const [lastTelegramCycleTime, setLastTelegramCycleTime] = useState<Date | null>(null);
+  const [lastTelegramMessageTime, setLastTelegramMessageTime] = useState<Date | null>(null);
+  const [lastOfficialFetchTime, setLastOfficialFetchTime] = useState<Date | null>(null);
+  const [nowTick, setNowTick] = useState<number>(Date.now());
   const [secondsSinceCheck, setSecondsSinceCheck] = useState<number>(0);
   const [secondsSinceRealData, setSecondsSinceRealData] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -123,6 +129,11 @@ export default function HomePage() {
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
   const [lastRefreshDiagnostics, setLastRefreshDiagnostics] = useState<RefreshDiagnostics | null>(null);
 
+  const lastFullSyncTsRef = useRef<number>(0);
+  const lastTelegramCycleTsRef = useRef<number>(0);
+  const lastTelegramMessageTsRef = useRef<number>(0);
+  const lastOfficialFetchTsRef = useRef<number>(0);
+
   // Initial and background high-frequency fetch of official alerts (7.5s loop for real-time accuracy within alerts.in.ua limits)
   useEffect(() => {
     let isMounted = true;
@@ -132,6 +143,11 @@ export default function HomePage() {
         if (isMounted) {
           setOfficialAlerts(res.status === 'OK' && !res.diagnostic.isStale ? res.alerts : []);
           setAlertsDiagnostic({ ...res.diagnostic });
+          if (res.status === 'OK' && res.diagnostic.sourceOnline) {
+            const fetchTs = res.diagnostic.lastSuccessfulFetchTs || Date.now();
+            lastOfficialFetchTsRef.current = fetchTs;
+            setLastOfficialFetchTime(new Date(fetchTs));
+          }
         }
       } catch (err) {
         console.error('Failed to load official alerts:', err);
@@ -154,6 +170,11 @@ export default function HomePage() {
       const res = await fetchActiveAlerts(undefined, { force: true });
       setOfficialAlerts(res.status === 'OK' && !res.diagnostic.isStale ? res.alerts : []);
       setAlertsDiagnostic({ ...res.diagnostic });
+      if (res.status === 'OK' && res.diagnostic.sourceOnline) {
+        const fetchTs = res.diagnostic.lastSuccessfulFetchTs || Date.now();
+        lastOfficialFetchTsRef.current = fetchTs;
+        setLastOfficialFetchTime(new Date(fetchTs));
+      }
     } finally {
       setIsRefreshingOfficial(false);
     }
@@ -296,6 +317,8 @@ export default function HomePage() {
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
+      setNowTick(now);
+
       if (lastCheckTime) {
         const secs = Math.floor((now - lastCheckTime.getTime()) / 1000);
         setSecondsSinceCheck(secs);
@@ -419,6 +442,38 @@ export default function HomePage() {
       setLastCheckTime(new Date());
       setSecondsSinceCheck(0);
 
+      const alertsOk = alertsRes.status === 'OK' && alertsRes.diagnostic.sourceOnline;
+      const tgHealthyCount = tgRes.metrics?.healthyCount ?? 0;
+      const tgOk = tgHealthyCount > 0;
+
+      // Update official alerts timestamp if success
+      if (alertsOk) {
+        const fetchTs = alertsRes.diagnostic.lastSuccessfulFetchTs || Date.now();
+        lastOfficialFetchTsRef.current = fetchTs;
+        setLastOfficialFetchTime(new Date(fetchTs));
+      }
+
+      // Update telegram cycle & message timestamps if healthy
+      if (tgOk) {
+        const cycleTs = tgRes.metrics?.lastSuccessfulCycleTs || Date.now();
+        lastTelegramCycleTsRef.current = cycleTs;
+        setLastTelegramCycleTime(new Date(cycleTs));
+
+        const msgTs = tgRes.metrics?.lastMessageTimestamp || tgRes.metrics?.lastRealDataTimestamp || 0;
+        if (msgTs > 0) {
+          lastTelegramMessageTsRef.current = msgTs;
+          setLastTelegramMessageTime(new Date(msgTs));
+        }
+      }
+
+      // FULL SYNC TIMESTAMP:
+      // Updated ONLY when a real cycle checking the main sources finishes successfully
+      if (alertsOk && tgOk) {
+        const fullSyncNow = Date.now();
+        lastFullSyncTsRef.current = fullSyncNow;
+        setLastFullSyncTime(new Date(fullSyncNow));
+      }
+
       const statusMap = tgRes.sourceStatus || {};
       setSourceStatuses(statusMap);
       setSourcesHealth(tgRes.metrics || {
@@ -437,7 +492,6 @@ export default function HomePage() {
       // Compute diagnostics
       const checkEndTime = Date.now();
       const durationMs = checkEndTime - checkStartTime;
-      const alertsOk = alertsRes.status === 'OK' && alertsRes.diagnostic.sourceOnline;
       const successfulSources = (alertsOk ? 1 : 0) + (tgRes.metrics?.healthyCount ?? 0);
       const timeoutSources = (alertsRes.status === 'ERROR' && alertsRes.diagnostic.errorDetails?.includes('aborted') ? 1 : 0) + (tgRes.metrics?.timeoutCount ?? 0);
       const totalSources = 1 + (tgRes.metrics?.totalSources ?? 0);
@@ -908,13 +962,31 @@ export default function HomePage() {
   const isDegraded = state === 'DEGRADED' || secondsSinceCheck > 90 || evaluation?.monitoringHealth === 'INCOMPLETE';
   const isGreen = !isRed && !isOrange && !isDegraded && isActive && (evaluation?.monitoringHealth === 'OK' || evaluation?.monitoringHealth === 'DEGRADED');
 
-  const formattedDataFreshness = secondsSinceRealData <= 1
-    ? 'щойно'
-    : secondsSinceRealData < 60
-    ? `${secondsSinceRealData}с тому`
-    : secondsSinceRealData < 3600
-    ? `${Math.round(secondsSinceRealData / 60)} хв тому`
-    : `${Math.round(secondsSinceRealData / 3600)} год тому`;
+  // Live ages in seconds derived from nowTick (updates every second in real time)
+  const fullSyncAgeSec = lastFullSyncTime ? Math.max(0, Math.floor((nowTick - lastFullSyncTime.getTime()) / 1000)) : null;
+  const telegramCycleAgeSec = lastTelegramCycleTime ? Math.max(0, Math.floor((nowTick - lastTelegramCycleTime.getTime()) / 1000)) : null;
+  const telegramMessageAgeSec = lastTelegramMessageTime ? Math.max(0, Math.floor((nowTick - lastTelegramMessageTime.getTime()) / 1000)) : null;
+  const officialFetchAgeSec = lastOfficialFetchTime
+    ? Math.max(0, Math.floor((nowTick - lastOfficialFetchTime.getTime()) / 1000))
+    : (alertsDiagnostic.receivedByAgentIso ? Math.max(0, Math.floor((nowTick - new Date(alertsDiagnostic.receivedByAgentIso).getTime()) / 1000)) : null);
+
+  const fullSyncFreshness = formatAgeWithStaleWarningUk(fullSyncAgeSec, 90);
+  const tgCycleFreshness = formatAgeWithStaleWarningUk(telegramCycleAgeSec, 90);
+  const tgMessageFreshness = formatAgeWithStaleWarningUk(telegramMessageAgeSec, 3600);
+  const officialFetchFreshness = formatAgeWithStaleWarningUk(officialFetchAgeSec, 60);
+
+  // Status badges
+  const isOfficialOnline = alertsDiagnostic.status === 'OK' && alertsDiagnostic.sourceOnline && !alertsDiagnostic.isStale && (officialFetchAgeSec !== null ? officialFetchAgeSec <= 60 : true);
+  const isOfficialDegraded = alertsDiagnostic.sourceOnline && (!isOfficialOnline);
+  const officialStatusLabel: 'ONLINE' | 'DEGRADED' | 'OFFLINE' = isOfficialOnline ? 'ONLINE' : isOfficialDegraded ? 'DEGRADED' : 'OFFLINE';
+
+  const tgHealthyCount = evaluation?.monitoringStats?.healthy ?? sourcesHealth?.healthyCount ?? 0;
+  const tgMonitoredCount = evaluation?.monitoringStats?.monitored ?? sourcesHealth?.monitoredSources ?? allSources.length;
+  const isTgOnline = tgHealthyCount >= Math.floor(Math.max(1, tgMonitoredCount) * 0.7) && (telegramCycleAgeSec !== null ? telegramCycleAgeSec <= 90 : true);
+  const isTgDegraded = tgHealthyCount > 0 && !isTgOnline;
+  const tgStatusLabel: 'ONLINE' | 'DEGRADED' | 'OFFLINE' = isTgOnline ? 'ONLINE' : isTgDegraded ? 'DEGRADED' : 'OFFLINE';
+
+  const formattedDataFreshness = formatAgeWithStaleWarningUk(secondsSinceRealData, 90).text;
 
   const isLocationLocked = trustedLocation?.lockMode === 'LOCKED' || trustedLocation?.lockMode === 'MANUAL';
   const isLocationUnreliable = trustedLocation?.confidenceState === 'UNRELIABLE';
@@ -929,9 +1001,9 @@ export default function HomePage() {
   ).length;
   const activeOfficialAlerts = getActiveAirRaidAlerts(officialAlerts);
   const activeOfficialAlertsCount = activeOfficialAlerts.length;
-  const officialSnapshotAgeSec = alertsDiagnostic.receivedByAgentIso
-    ? Math.max(0, Math.floor((Date.now() - new Date(alertsDiagnostic.receivedByAgentIso).getTime()) / 1000))
-    : 0;
+  const officialSnapshotAgeSec = officialFetchAgeSec ?? (alertsDiagnostic.receivedByAgentIso
+    ? Math.max(0, Math.floor((nowTick - new Date(alertsDiagnostic.receivedByAgentIso).getTime()) / 1000))
+    : 0);
   const historyThreats = (evaluation?.historyEvents || []).filter(
     (t) => (t.status === 'stale' || t.status === 'cleared') && t.category !== 'GENERAL_AIR_RAID'
   );
@@ -1685,14 +1757,14 @@ export default function HomePage() {
                 <span className="text-slate-400 block font-mono">ОНОВЛЕНО ДЖЕРЕЛОМ:</span>
                 <span className="font-mono font-bold text-cyan-300 truncate block mt-0.5">
                   {alertsDiagnostic.sourceUpdatedIso
-                    ? new Date(alertsDiagnostic.sourceUpdatedIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                    : 'Щойно'}
+                    ? formatTimeHHMMSS(alertsDiagnostic.sourceUpdatedIso)
+                    : '—'}
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
                 <span className="text-slate-400 block font-mono">ВІК ДАНИХ (LATENCY):</span>
                 <span className={'font-mono font-bold mt-0.5 block ' + (alertsDiagnostic.isStale ? 'text-amber-400' : 'text-emerald-400')}>
-                  {officialSnapshotAgeSec} сек
+                  {officialSnapshotAgeSec} с
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
@@ -1782,6 +1854,33 @@ export default function HomePage() {
               </span>
             </div>
 
+            {/* 1. TOP CARD: LAST FULL SYNCHRONIZATION */}
+            <div className="p-3 rounded-xl bg-[#070a10] border border-cyan-900/60 space-y-1.5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-200 truncate">
+                  Остання повна синхронізація:
+                </span>
+                <span className="font-mono font-bold text-cyan-300 text-xs shrink-0">
+                  {lastFullSyncTime ? formatTimeHHMMSS(lastFullSyncTime) : 'Очікування'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] pt-1 border-t border-cyan-950/80">
+                <span className="text-slate-400">Свіжість синхронізації:</span>
+                <span className={'font-mono font-bold ' + (fullSyncFreshness.isStale ? 'text-amber-400' : 'text-emerald-400')}>
+                  {fullSyncFreshness.text}
+                </span>
+              </div>
+              {fullSyncFreshness.isStale && lastFullSyncTime && (
+                <div className="text-[10px] text-amber-300 bg-amber-950/60 border border-amber-800/80 rounded-lg px-2 py-1 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  <span>⚠️ Останні успішні дані: {formatTimeHHMMSS(lastFullSyncTime)}</span>
+                </div>
+              )}
+              <p className="text-[9px] text-slate-500 italic">
+                * Час фактичного успішного завершення перевірки основних джерел, а не frontend refresh
+              </p>
+            </div>
+
             {/* OVERALL MONITORING HEALTH SUMMARY */}
             <div className="p-2.5 rounded-xl bg-[#070a10] border border-slate-800 space-y-1">
               <div className="flex items-center justify-between text-xs">
@@ -1802,66 +1901,122 @@ export default function HomePage() {
             </div>
 
             {/* SOURCE BREAKDOWN CARDS */}
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              {/* TELEGRAM STATS */}
-              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1">
-                <span className="text-slate-400 block font-mono font-bold text-[10px] border-b border-slate-800 pb-1">
-                  📡 ДЖЕРЕЛА TELEGRAM
-                </span>
-                <div className="flex justify-between text-slate-300">
-                  <span className="text-amber-300 font-bold">⭐ МОЇ ПРІОРИТЕТНІ:</span>
-                  <span className="font-mono font-bold text-amber-300">{evaluation?.monitoringStats?.userPriorityTotal ?? sourcesHealth?.userPriorityTotal ?? 11}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+              {/* 2. TELEGRAM CARD */}
+              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+                  <span className="text-slate-300 font-mono font-bold text-[10px]">
+                    📡 TELEGRAM
+                  </span>
+                  <span className={'text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ' + (
+                    tgStatusLabel === 'ONLINE'
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                      : tgStatusLabel === 'DEGRADED'
+                      ? 'bg-amber-950 text-amber-300 border-amber-800'
+                      : 'bg-red-950 text-red-300 border-red-800'
+                  )}>
+                    {tgStatusLabel}
+                  </span>
                 </div>
-                <div className="flex justify-between text-slate-300">
-                  <span className="text-amber-400 font-semibold">⚡ CRITICAL (CORE):</span>
-                  <span className="font-mono font-bold text-amber-400">{evaluation?.monitoringStats?.criticalTotal ?? sourcesHealth?.criticalTotal ?? 25}</span>
+
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Останній успішний цикл:</span>
+                    <span className="font-mono font-bold text-cyan-300">
+                      {lastTelegramCycleTime ? formatTimeHHMMSS(lastTelegramCycleTime) : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Останнє отримане повідомлення:</span>
+                    <span className="font-mono font-bold text-white">
+                      {lastTelegramMessageTime ? formatTimeHHMMSS(lastTelegramMessageTime) : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Свіжість:</span>
+                    <span className={'font-mono font-bold ' + (tgCycleFreshness.isStale ? 'text-amber-400' : 'text-emerald-400')}>
+                      {tgCycleFreshness.text}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Healthy:</span>
+                    <span className="font-mono font-bold text-emerald-400">
+                      {tgHealthyCount}/{tgMonitoredCount}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>🌐 Регіональні:</span>
-                  <span className="font-mono font-bold text-slate-300">{evaluation?.monitoringStats?.regionalTotal ?? sourcesHealth?.regionalTotal ?? 38}</span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>🟢 Працюють (Healthy):</span>
-                  <span className="font-mono font-bold text-emerald-400">{evaluation?.monitoringStats?.healthy ?? (sourcesHealth?.healthyCount ?? 74)}</span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>🗑️ Видалено Unusable:</span>
-                  <span className="font-mono font-bold text-rose-400 line-through">{evaluation?.monitoringStats?.removedUnusable ?? sourcesHealth?.removedUnusableCount ?? 98}</span>
-                </div>
-                <div className="flex justify-between text-slate-300 border-t border-slate-800/80 pt-0.5">
-                  <span className="font-bold text-cyan-300">Усього діючих:</span>
-                  <span className="font-mono font-bold text-cyan-400">{evaluation?.monitoringStats?.monitored ?? (sourcesHealth?.monitoredSources ?? 74)}</span>
+
+                {tgCycleFreshness.isStale && lastTelegramCycleTime && (
+                  <div className="text-[9px] text-amber-300 bg-amber-950/70 border border-amber-800 rounded px-1.5 py-0.5 mt-1">
+                    ⚠️ Останні успішні дані: {formatTimeHHMMSS(lastTelegramCycleTime)}
+                  </div>
+                )}
+
+                <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
+                  <span>⭐ Пріоритетні: <strong className="text-amber-300">{evaluation?.monitoringStats?.userPriorityHealthy ?? sourcesHealth?.userPriorityHealthy ?? 11}/{evaluation?.monitoringStats?.userPriorityTotal ?? sourcesHealth?.userPriorityTotal ?? 11}</strong></span>
+                  <span>⚡ Core: <strong className="text-amber-400">{evaluation?.monitoringStats?.criticalHealthy ?? sourcesHealth?.criticalHealthy ?? 25}/{evaluation?.monitoringStats?.criticalTotal ?? sourcesHealth?.criticalTotal ?? 25}</strong></span>
                 </div>
               </div>
 
-              {/* OFFICIAL ALERTS & TIMESTAMPS */}
-              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1">
-                <span className="text-slate-400 block font-mono font-bold text-[10px] border-b border-slate-800 pb-1">
-                  🚨 ОФІЦІЙНІ ТРИВОГИ
-                </span>
-                <div className="flex justify-between text-slate-300">
-                  <span>Статус Alerts:</span>
-                  <span className={'font-mono font-bold ' + (alertsDiagnostic.status === 'OK' ? 'text-emerald-400' : 'text-rose-400')}>
-                    {alertsDiagnostic.status === 'OK' ? 'OK (Онлайн)' : 'ERROR'}
+              {/* 3. OFFICIAL ALERTS CARD */}
+              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+                  <span className="text-slate-300 font-mono font-bold text-[10px]">
+                    🚨 OFFICIAL ALERTS
+                  </span>
+                  <span className={'text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ' + (
+                    officialStatusLabel === 'ONLINE'
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                      : officialStatusLabel === 'DEGRADED'
+                      ? 'bg-amber-950 text-amber-300 border-amber-800'
+                      : 'bg-red-950 text-red-300 border-red-800'
+                  )}>
+                    {officialStatusLabel}
                   </span>
                 </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>Останні дані:</span>
-                  <span className="font-mono font-bold text-white truncate max-w-[80px]">
-                    {evaluation?.lastRealDataIso ? new Date(evaluation.lastRealDataIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Очікування'}
-                  </span>
+
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Останній успішний fetch:</span>
+                    <span className="font-mono font-bold text-cyan-300">
+                      {lastOfficialFetchTime ? formatTimeHHMMSS(lastOfficialFetchTime) : (alertsDiagnostic.receivedByAgentIso ? formatTimeHHMMSS(alertsDiagnostic.receivedByAgentIso) : '—')}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Час даних source:</span>
+                    <span className="font-mono font-bold text-white truncate max-w-[85px]">
+                      {alertsDiagnostic.sourceUpdatedIso ? formatTimeHHMMSS(alertsDiagnostic.sourceUpdatedIso) : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Свіжість:</span>
+                    <span className={'font-mono font-bold ' + (officialFetchFreshness.isStale ? 'text-amber-400' : 'text-emerald-400')}>
+                      {officialFetchFreshness.text}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Статус API:</span>
+                    <span className={'font-mono font-bold ' + (alertsDiagnostic.status === 'OK' ? 'text-emerald-400' : 'text-rose-400')}>
+                      {alertsDiagnostic.status === 'OK' ? 'ONLINE' : 'ERROR'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>Останній цикл:</span>
-                  <span className="font-mono font-bold text-cyan-400 truncate max-w-[80px]">
-                    {lastCheckTime ? lastCheckTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Щойно'}
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-300">
-                  <span>Свіжість:</span>
-                  <span className={'font-mono font-bold ' + (isDegraded ? 'text-amber-400' : 'text-emerald-400')}>
-                    {formattedDataFreshness}
-                  </span>
+
+                {officialFetchFreshness.isStale && (lastOfficialFetchTime || alertsDiagnostic.lastSuccessfulFetchTs) && (
+                  <div className="text-[9px] text-amber-300 bg-amber-950/70 border border-amber-800 rounded px-1.5 py-0.5 mt-1">
+                    ⚠️ Останні успішні дані: {formatTimeHHMMSS(lastOfficialFetchTime || alertsDiagnostic.lastSuccessfulFetchTs)}
+                  </div>
+                )}
+
+                <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Активні зони: <strong className="text-rose-300">{activeOfficialAlertsCount}</strong></span>
+                  <span>Шар WGS84: <strong className="text-cyan-300">{officialGeometryDiagnostic.renderedGeometryCount}</strong></span>
                 </div>
               </div>
             </div>

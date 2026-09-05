@@ -26,6 +26,8 @@ export interface AlertsDiagnostic {
   dataAgeSec: number;
   isStale: boolean;
   lastFetchTime: string;
+  lastSuccessfulFetchIso?: string;
+  lastSuccessfulFetchTs?: number;
   errorDetails?: string;
   usedProxy?: string;
 }
@@ -46,6 +48,10 @@ export let lastAlertsFetchDiagnostic: AlertsDiagnostic = {
   isStale: false,
   lastFetchTime: ''
 };
+
+let lastSuccessfulAlertsFetchIso: string = '';
+let lastSuccessfulAlertsFetchTs: number = 0;
+let lastAlertsSourceUpdatedIso: string = '';
 
 type FetchResult = {
   alerts: RawAlert[];
@@ -123,6 +129,12 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
       const json = await response.json();
       const { alerts, sourceUpdatedIso = new Date().toISOString() } = parsePayload(endpoint.isJina ? json?.data?.content : json);
       const receivedAt = Date.now();
+      lastSuccessfulAlertsFetchIso = new Date(receivedAt).toISOString();
+      lastSuccessfulAlertsFetchTs = receivedAt;
+      if (sourceUpdatedIso) {
+        lastAlertsSourceUpdatedIso = sourceUpdatedIso;
+      }
+
       // `meta.last_updated_at` is the time of the last alert-state mutation, not
       // the age of this HTTP response. A successful no-store/bypassed fetch is a
       // current snapshot even when no zone has changed for several minutes.
@@ -133,6 +145,8 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
         activeAlertsCount: getActiveAirRaidAlerts(alerts).length,
         sourceUpdatedIso,
         receivedByAgentIso: new Date(receivedAt).toISOString(),
+        lastSuccessfulFetchIso: lastSuccessfulAlertsFetchIso,
+        lastSuccessfulFetchTs: lastSuccessfulAlertsFetchTs,
         dataAgeSec,
         isStale: false,
         lastFetchTime: new Date(receivedAt).toISOString(),
@@ -154,9 +168,11 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
     sourceOnline: false,
     status: 'ERROR',
     activeAlertsCount: 0,
-    sourceUpdatedIso: '',
+    sourceUpdatedIso: lastAlertsSourceUpdatedIso || '',
     receivedByAgentIso: new Date(requestedAt).toISOString(),
-    dataAgeSec: 0,
+    lastSuccessfulFetchIso: lastSuccessfulAlertsFetchIso || undefined,
+    lastSuccessfulFetchTs: lastSuccessfulAlertsFetchTs || undefined,
+    dataAgeSec: lastSuccessfulAlertsFetchTs ? Math.max(0, Math.floor((Date.now() - lastSuccessfulAlertsFetchTs) / 1000)) : 0,
     isStale: true,
     lastFetchTime: new Date().toISOString(),
     errorDetails: failures.join('; ')
@@ -234,4 +250,9 @@ export function isUserInOfficialAlert(userOblast?: string, userLocationName?: st
   });
 }
 
-export function __resetAlertsFetchStateForTests(): void { inFlightFetch = null; }
+export function __resetAlertsFetchStateForTests(): void {
+  inFlightFetch = null;
+  lastSuccessfulAlertsFetchIso = '';
+  lastSuccessfulAlertsFetchTs = 0;
+  lastAlertsSourceUpdatedIso = '';
+}
