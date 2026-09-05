@@ -67,6 +67,8 @@ export function getActiveAirRaidAlerts(alerts: RawAlert[] = []): RawAlert[] {
   return alerts.filter(alert => !alert.finished_at && alert.alert_type === 'air_raid');
 }
 
+import { isCoordinateInRenderedAlert } from '../officialAlertGeometry';
+
 function parsePayload(payload: any): { alerts: RawAlert[]; sourceUpdatedIso?: string } {
   const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
   if (!parsed || !Array.isArray(parsed.alerts)) throw new Error('Invalid official alerts payload');
@@ -82,8 +84,24 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
   const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${token}`;
   const endpoints: { name: string; url: string; headers?: Record<string, string>; isJina?: boolean }[] = [];
 
+  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://personal-safety-backend.lydian-steed.workers.dev';
+  if (typeof window !== 'undefined' || process.env.NODE_ENV !== 'test') {
+    endpoints.push({
+      name: 'worker-proxy',
+      url: `${backendBase}/api/alerts/active`,
+      headers: { Accept: 'application/json' }
+    });
+  }
+
   if (typeof window === 'undefined') {
-    endpoints.push({ name: 'direct', url: directUrl, headers: { Accept: 'application/json' } });
+    endpoints.push({
+      name: 'direct',
+      url: directUrl,
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`
+      }
+    });
   }
   endpoints.push({
     name: 'jina',
@@ -218,12 +236,40 @@ function canonicalOblast(value?: string): string {
 }
 
 /** Local alerts are deliberately never promoted to their whole oblast. */
-export function isUserInOfficialAlert(userOblast?: string, userLocationName?: string, alerts: RawAlert[] = []): boolean {
+export function isUserInOfficialAlert(
+  userOblast?: string,
+  userLocationName?: string,
+  alerts: RawAlert[] = [],
+  userCoords?: { lat: number; lng: number }
+): boolean {
+  const activeAlerts = getActiveAirRaidAlerts(alerts);
+  if (activeAlerts.length === 0) return false;
+
+  // 1. Precise GPS Point-in-Polygon check if coordinates are provided
+  if (userCoords && typeof userCoords.lat === 'number' && typeof userCoords.lng === 'number') {
+    if (isCoordinateInRenderedAlert(userCoords.lat, userCoords.lng)) {
+      return true;
+    }
+  }
+
   const userOblastCanonical = canonicalOblast(userOblast);
   const userLocationCanonical = canonicalName(userLocationName);
   const userIsKyivCity = canonicalName(userOblast) === 'київ' || userLocationCanonical === 'київ';
 
-  return getActiveAirRaidAlerts(alerts).some(alert => {
+  // Extract individual location tokens from compound names like "Ірпінь / Буча", "Київ (Хрещатик / Центр)"
+  const locationTokens: string[] = [];
+  if (userLocationName) {
+    const rawTokens = userLocationName.split(/[\/\,\;]/);
+    for (const tok of rawTokens) {
+      const c = canonicalName(tok);
+      if (c && !locationTokens.includes(c)) locationTokens.push(c);
+    }
+    if (userLocationCanonical && !locationTokens.includes(userLocationCanonical)) {
+      locationTokens.push(userLocationCanonical);
+    }
+  }
+
+  return activeAlerts.some(alert => {
     if (alert.location_type === 'oblast') {
       const alertIsKyivCity = alert.location_title.trim().startsWith('м.') && canonicalName(alert.location_title) === 'київ';
       if (alertIsKyivCity !== userIsKyivCity && (alertIsKyivCity || userIsKyivCity)) return false;
@@ -236,20 +282,30 @@ export function isUserInOfficialAlert(userOblast?: string, userLocationName?: st
       return false;
     }
 
-    if (!userLocationCanonical) return false;
+    if (locationTokens.length === 0) return false;
     const alertCanon = canonicalName(alert.location_title);
 
-    if (alertCanon === userLocationCanonical) return true;
+    for (const token of locationTokens) {
+      if (alertCanon === token) return true;
 
-    // Stem match (e.g. 'бровари' vs 'броварський', 'бориспіль' vs 'бориспільський')
-    const userStem = userLocationCanonical.slice(0, Math.min(userLocationCanonical.length, 5));
-    const alertStem = alertCanon.slice(0, Math.min(alertCanon.length, 5));
-    if (userStem.length >= 4 && userStem === alertStem) {
-      return true;
+      // Stem match (e.g. 'бровари' vs 'броварський', 'бориспіль' vs 'бориспільський')
+      const userStem = token.slice(0, Math.min(token.length, 5));
+      const alertStem = alertCanon.slice(0, Math.min(alertCanon.length, 5));
+      if (userStem.length >= 4 && (userStem === alertStem || alertCanon.startsWith(userStem) || token.startsWith(alertStem))) {
+        return true;
+      }
     }
 
     return false;
   });
+}
+
+export function getLastKnownGoodAlerts(): RawAlert[] {
+  return lastKnownSuccessfulAlerts;
+}
+
+export function getLastKnownSuccessfulFetchTs(): number {
+  return lastSuccessfulAlertsFetchTs;
 }
 
 export function __resetAlertsFetchStateForTests(): void {
@@ -259,3 +315,4 @@ export function __resetAlertsFetchStateForTests(): void {
   lastAlertsSourceUpdatedIso = '';
   lastKnownSuccessfulAlerts = [];
 }
+

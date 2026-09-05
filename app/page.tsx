@@ -188,6 +188,20 @@ export default function HomePage() {
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
   const [lastRefreshDiagnostics, setLastRefreshDiagnostics] = useState<RefreshDiagnostics | null>(null);
+  const [lastAllClearTs, setLastAllClearTs] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return Number(localStorage.getItem('psa_last_all_clear_ts')) || 0;
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
+  });
+  const lastAllClearTsRef = useRef<number>(0);
+  useEffect(() => {
+    lastAllClearTsRef.current = lastAllClearTs;
+  }, [lastAllClearTs]);
 
   // Free Apple Signing Health & Auto-Refresh state ($0/year Apple Cost)
   const [signingHealth, setSigningHealth] = useState<{
@@ -1110,7 +1124,8 @@ export default function HomePage() {
         tgRes.messages,
         effectiveCycleTs,
         alertsRes.status,
-        tgRes.metrics
+        tgRes.metrics,
+        lastAllClearTsRef.current
       );
 
       if (result.lastRealDataTimestamp > 0) {
@@ -1767,10 +1782,53 @@ export default function HomePage() {
   const isLocationLocked = trustedLocation?.lockMode === 'LOCKED' || trustedLocation?.lockMode === 'MANUAL';
   const isLocationUnreliable = trustedLocation?.confidenceState === 'UNRELIABLE';
 
-  const isUnderOfficialAlert = isUserInOfficialAlert(trustedLocation?.oblast, trustedLocation?.name, officialAlerts);
+  const isUnderOfficialAlert = isUserInOfficialAlert(
+    trustedLocation?.oblast,
+    trustedLocation?.name,
+    officialAlerts,
+    trustedLocation ? { lat: trustedLocation.lat, lng: trustedLocation.lng } : undefined
+  );
+
+  const wasUnderOfficialAlertRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (wasUnderOfficialAlertRef.current === null) {
+      wasUnderOfficialAlertRef.current = isUnderOfficialAlert;
+      return;
+    }
+
+    // Official alert transitioned from TRUE to FALSE (Confirmed All-Clear)
+    if (wasUnderOfficialAlertRef.current && !isUnderOfficialAlert) {
+      const nowClear = Date.now();
+      setLastAllClearTs(nowClear);
+      lastAllClearTsRef.current = nowClear;
+      try {
+        localStorage.setItem('psa_last_all_clear_ts', String(nowClear));
+      } catch {}
+
+      // Purge tactical threats on backend Worker and reset cooldowns
+      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://personal-safety-backend.lydian-steed.workers.dev';
+      const deviceId = getOrCreateDeviceId();
+      fetch(`${backendBase}/api/alerts/all-clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          locationTitle: trustedLocation?.name,
+          oblast: trustedLocation?.oblast,
+          clearAll: true
+        })
+      }).catch(err => console.warn('[PSA] Worker all-clear error:', err));
+    }
+
+    wasUnderOfficialAlertRef.current = isUnderOfficialAlert;
+  }, [isUnderOfficialAlert, trustedLocation?.name, trustedLocation?.oblast]);
 
   const radarThreats = (evaluation?.threatEvents || []).filter(
-    (t) => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.distanceKm === null || t.distanceKm <= 75)
+    (t) => t.status === 'active' &&
+           t.category !== 'ALL_CLEAR' &&
+           t.category !== 'GENERAL_AIR_RAID' &&
+           (t.distanceKm === null || t.distanceKm <= 75) &&
+           (!lastAllClearTs || new Date(t.lastConfirmedAt).getTime() > lastAllClearTs)
   );
   const activeEventsCount = (evaluation?.threatEvents || []).filter(
     (t) => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID'
@@ -1900,126 +1958,141 @@ export default function HomePage() {
           )}
 
           {/* 1-SECOND READABILITY STATUS HERO CARD */}
-          <div className={'mb-4 rounded-3xl p-6 border transition-all duration-300 shadow-2xl ' + (
+          <div className={'mb-4 rounded-3xl p-5 border transition-all duration-300 shadow-2xl ' + (
             !isActive
               ? 'bg-[#0f1420] border-[#1d273c]'
               : isRed
               ? 'bg-gradient-to-b from-[#3a0606] to-[#1e0505] border-red-500 ring-2 ring-red-500/50 shadow-red-950/80 animate-pulse-slow'
               : isOrange
               ? 'bg-gradient-to-b from-[#2d1804] to-[#180e03] border-amber-500 shadow-amber-950/60'
-              : isDegraded
-              ? 'bg-[#151a24] border-slate-700 shadow-slate-950/50'
+              : isUnderOfficialAlert
+              ? 'bg-gradient-to-b from-[#300a0a] to-[#150505] border-rose-500/70 shadow-rose-950/50'
               : 'bg-gradient-to-b from-[#082015] to-[#05140e] border-emerald-500/60 shadow-emerald-950/40'
           )}>
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="text-[11px] font-mono tracking-wider uppercase text-slate-400">
-                  {isActive ? 'ПОТОЧНИЙ СТАН СЕКТОРУ' : 'ГОТОВИЙ ДО ЗАПУСКУ'}
-                </span>
-                <h2 className="text-2xl font-black tracking-tight mt-1 text-white flex items-center gap-2">
-                  {!isActive ? (
-                    <span>⚪ НЕ АКТИВОВАНО</span>
-                  ) : isRed ? (
-                    <span className="text-red-400">🔴 НЕБЕЗПЕКА ПОРУЧ!</span>
-                  ) : isOrange ? (
-                    <span className="text-amber-400">🟠 УВАГА В ОБЛАСТІ</span>
-                  ) : isDegraded ? (
-                    <span className="text-slate-300">⚪ МОНІТОРИНГ НЕПОВНИЙ</span>
-                  ) : (
-                    <span className="text-emerald-400">🟢 СЕКТОР ЧИСТИЙ</span>
-                  )}
-                </h2>
-
-                {/* COMPACT OFFICIAL AIR RAID BADGE */}
-                {isUnderOfficialAlert && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500/80 text-rose-300 text-xs font-bold shadow-lg shadow-rose-950/40 animate-pulse">
-                    <span>⚠</span>
-                    <span>ОФІЦІЙНА ТРИВОГА</span>
-                    <span className="text-[10px] text-rose-400 font-mono">({trustedLocation?.oblast || 'Область'})</span>
+            {/* 3 CLEAN READABILITY STATUS LINES (User Requirement 5) */}
+            <div className="space-y-2.5">
+              {/* 1. ОФІЦІЙНА ТРИВОГА: 🟢/🟡/🔴 */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-black/40 border border-white/5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-xl shrink-0">
+                    {isUnderOfficialAlert ? '🔴' : activeOfficialAlertsCount > 0 ? '🟡' : '🟢'}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-mono tracking-wider uppercase text-slate-400 block">
+                      ОФІЦІЙНА ТРИВОГА
+                    </span>
+                    <span className={'text-sm font-black truncate block ' + (
+                      isUnderOfficialAlert ? 'text-rose-400 animate-pulse' : activeOfficialAlertsCount > 0 ? 'text-amber-300' : 'text-emerald-400'
+                    )}>
+                      {isUnderOfficialAlert
+                        ? `АКТИВНА ТРИВОГА (${trustedLocation?.oblast || 'Ваш регіон'})`
+                        : activeOfficialAlertsCount > 0
+                        ? `ВІДБІЙ У ВАС (є в ін. областях)`
+                        : 'ВІДБІЙ (НЕМАЄ)'}
+                    </span>
                   </div>
+                </div>
+                {isUnderOfficialAlert && (
+                  <span className="px-2 py-0.5 rounded-md bg-rose-950 text-rose-300 border border-rose-700 text-[10px] font-bold uppercase shrink-0">
+                    Укриття!
+                  </span>
                 )}
               </div>
-              <div className={'p-3 rounded-2xl ' + (
-                !isActive ? 'bg-slate-800 text-slate-400' :
-                isRed ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-bounce' :
-                isOrange ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
-                isDegraded ? 'bg-slate-800 text-slate-400' :
-                'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-              )}>
-                {isRed ? <Flame className="w-7 h-7" /> : isOrange ? <AlertTriangle className="w-7 h-7" /> : isGreen ? <ShieldCheck className="w-7 h-7" /> : <Radio className="w-7 h-7" />}
+
+              {/* 2. ЛОКАЛЬНІ ЗАГРОЗИ: 🟢 немає / 🚨 загроза */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-black/40 border border-white/5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-xl shrink-0">
+                    {isRed || radarThreats.length > 0 ? '🚨' : isOrange ? '⚠️' : '🟢'}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-mono tracking-wider uppercase text-slate-400 block">
+                      ЛОКАЛЬНІ ЗАГРОЗИ
+                    </span>
+                    <span className={'text-sm font-black truncate block ' + (
+                      isRed ? 'text-red-400 animate-pulse' : isOrange ? 'text-amber-400' : 'text-emerald-400'
+                    )}>
+                      {isRed && evaluation?.primaryThreat
+                        ? `${evaluation.primaryThreat.categoryNameUk} · ${evaluation.primaryThreat.honestDistanceText}${evaluation.primaryThreat.bearingSectorUk ? ' · ' + evaluation.primaryThreat.bearingSectorUk : ''}`
+                        : isOrange && evaluation?.primaryThreat
+                        ? `Увага в області · ${evaluation.primaryThreat.detectedLocation}`
+                        : 'НЕМАЄ (сектор чистий)'}
+                    </span>
+                  </div>
+                </div>
+                {radarThreats.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-red-950 text-red-300 border border-red-700 text-[10px] font-mono font-bold shrink-0">
+                    {radarThreats.length} {radarThreats.length === 1 ? 'ціль' : 'цілі'}
+                  </span>
+                )}
+              </div>
+
+              {/* 3. ОНОВЛЕНО: X сек тому */}
+              <div className="flex items-center justify-between px-1 text-xs text-slate-400">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                  <span className="font-mono text-[11px] text-slate-300">
+                    Оновлено: {secondsSinceCheck <= 1 ? 'щойно' : `${secondsSinceCheck} сек тому`}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleManualDataRefresh}
+                  disabled={isManualRefreshing}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-cyan-400 hover:text-cyan-300 active:scale-95 transition-all"
+                  title="Оновити зараз"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                  <span>{isManualRefreshing ? 'Оновлюю...' : 'Оновити'}</span>
+                </button>
               </div>
             </div>
 
-            <p className="text-xs text-slate-200 mt-3 leading-relaxed font-medium">
-              {!isActive
-                ? 'Натисніть кнопку «Активувати захист», заблокуйте iPhone та покладіть у кишеню. Система оголосить небезпеку голосом на замкненому екрані.'
-                : isRed
-                ? evaluation?.primaryThreat?.confidenceReason || 'Підтверджено пряму загрозу у вашому секторі! Негайно пройдіть в укриття!'
-                : isOrange
-                ? evaluation?.stateDescriptionUk || 'Ціль спостерігається в області / коридорі підльоту. Загрози для вашого мікрорайону наразі немає.'
-                : isDegraded
-                ? (evaluation?.monitoringHealthReasonUk
-                    ? `⚠️ ${evaluation.monitoringHealthReasonUk}${evaluation.monitoringHealthDetailsUk ? ' • ' + evaluation.monitoringHealthDetailsUk : ''}`
-                    : '⚠️ Дані застаріли або відсутній зв’язок із джерелами.')
-                : isUnderOfficialAlert
-                ? `Для вашої території оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
-                : evaluation?.stateDescriptionUk || `Локальних загроз поблизу не виявлено. ${monitoredSourcesCount} радарних джерел сканують ваш сектор у реальному часі.`}
-            </p>
-
-            {/* TELEMETRY METRICS */}
+            {/* COLLAPSED TECHNICAL DIAGNOSTICS & TELEMETRY */}
             {trustedLocation && (
-              <div className="mt-4 pt-3 border-t border-white/10 grid grid-cols-2 gap-2 text-xs">
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-slate-400 block font-mono flex items-center justify-between">
-                    <span>📍 ВАША ЛОКАЦІЯ</span>
-                    {isLocationLocked ? <span className="text-indigo-400 font-bold">LOCKED 📌</span> : null}
-                  </span>
-                  <span className="font-bold text-white truncate block">{trustedLocation.name}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {isLocationUnreliable
-                      ? '⚠️ Остання підтверджена'
-                      : isLocationLocked
-                      ? '📌 Зафіксовано'
-                      : `GPS ±${Math.round(trustedLocation.accuracyMeters)}м`}
-                  </span>
-                </div>
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-slate-400 block font-mono">📡 ЗОНА ЗАХИСТУ</span>
-                  <span className="font-bold text-white block">Радіус {radiusKm.toFixed(0)} км</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Флюгер Зона 1</span>
-                </div>
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex flex-col justify-between">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 block font-mono">⏱️ ПЕРЕВІРКА ДАНИХ</span>
-                    <button
-                      type="button"
-                      onClick={handleManualDataRefresh}
-                      disabled={isManualRefreshing}
-                      className="p-1 -mr-1 -mt-1 rounded-lg text-cyan-400 hover:text-cyan-300 hover:bg-white/10 active:scale-95 disabled:opacity-60 transition-all flex items-center gap-1 text-[10px] font-mono font-bold"
-                      title="Примусово оновити всі дані зараз"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
-                    </button>
-                  </div>
-                  <div className="mt-1">
-                    <span className={'font-mono font-bold text-xs truncate block ' + (isManualRefreshing ? 'text-cyan-300 animate-pulse' : secondsSinceCheck > 90 ? 'text-amber-400' : 'text-white')}>
-                      {isManualRefreshing ? '↻ Оновлюю...' : secondsSinceCheck <= 10 ? 'Перевірено щойно' : `Перевірено ${formatAgeWithStaleWarningUk(secondsSinceCheck, 90).text}`}
+              <details className="mt-3 pt-3 border-t border-white/10 group">
+                <summary className="text-[11px] font-mono text-slate-400 hover:text-slate-200 cursor-pointer flex items-center justify-between select-none">
+                  <span>📍 {trustedLocation.name} · {radiusKm} км · Деталі та діагностика</span>
+                  <span className="text-[10px] text-slate-500 group-open:rotate-180 transition-transform">▼</span>
+                </summary>
+                <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-[10px] text-slate-400 block font-mono flex items-center justify-between">
+                      <span>📍 ВАША ЛОКАЦІЯ</span>
+                      {isLocationLocked ? <span className="text-indigo-400 font-bold">LOCKED 📌</span> : null}
                     </span>
-                    <span className="text-[10px] text-slate-400 font-mono block truncate mt-0.5">
-                      {lastRealDataTsRef.current > 0 ? `Дані джерел: ${formatAgeWithStaleWarningUk(secondsSinceRealData, 1800).text}` : `${monitoredSourcesCount} джерел онлайн`}
+                    <span className="font-bold text-white block truncate">{trustedLocation.name}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {isLocationUnreliable
+                        ? '⚠️ Нестабільна'
+                        : isLocationLocked
+                        ? '📌 Зафіксовано'
+                        : `GPS ±${Math.round(trustedLocation.accuracyMeters)}м`}
                     </span>
                   </div>
+                  <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-[10px] text-slate-400 block font-mono">📡 ЗОНА ЗАХИСТУ</span>
+                    <span className="font-bold text-white block">Радіус {radiusKm.toFixed(0)} км</span>
+                    <span className="text-[10px] text-slate-400 font-mono">Флюгер 15-45 км</span>
+                  </div>
+                  <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-[10px] text-slate-400 block font-mono">⏱️ СИНХРОНІЗАЦІЯ</span>
+                    <span className="font-mono text-white text-xs block">
+                      {lastRealDataTsRef.current > 0 ? formatAgeWithStaleWarningUk(secondsSinceRealData, 1800).text : 'Усі джерела OK'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">{monitoredSourcesCount} джерел онлайн</span>
+                  </div>
+                  <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
+                    <span className="font-bold text-white block">
+                      {audioEnabled ? '🔊 Голос Ajax' : '🔇 Тихий'}
+                    </span>
+                    <span className={'text-[10px] font-mono ' + (audioEnabled ? 'text-blue-400' : 'text-amber-400')}>
+                      {audioEnabled ? 'Оголошення активне' : 'Без звуку'}
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
-                  <span className="font-bold text-white block">
-                    {audioEnabled ? '🔊 Голос Ajax' : '🔇 Тихий'}
-                  </span>
-                  <span className={'text-[10px] font-mono ' + (audioEnabled ? 'text-blue-400' : 'text-amber-400')}>
-                    {audioEnabled ? 'Оголошення активне' : 'Без звуку'}
-                  </span>
-                </div>
-              </div>
+              </details>
             )}
           </div>
 

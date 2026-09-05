@@ -150,31 +150,31 @@ export default function SafetyMap({
     return () => clearTimeout(timer);
   }, [isFullScreen, activeTab]);
 
+  const lastCenterTriggerRef = useRef<number | undefined>(undefined);
+
   // Automatic centering and zoom adaptation when centerTrigger fires
   useEffect(() => {
     if (!isMapReady || !mapInstanceRef.current || !userLocation) return;
+    if (centerTrigger === undefined || centerTrigger === lastCenterTriggerRef.current) return;
+    lastCenterTriggerRef.current = centerTrigger;
+
     const map = mapInstanceRef.current;
     userInteractedRef.current = false;
 
     const timer = setTimeout(() => {
       try {
         map.invalidateSize();
-        if (radiusCircleRef.current) {
-          const bounds = radiusCircleRef.current.getBounds();
-          map.fitBounds(bounds.pad(0.12), { animate: true, maxZoom: 14 });
-        } else {
-          map.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
-            animate: true,
-            duration: 0.5
-          });
-        }
+        map.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
+          animate: true,
+          duration: 0.5
+        });
       } catch (e) {
         console.warn('Map centerTrigger error:', e);
       }
-    }, 150);
+    }, 100);
 
     return () => clearTimeout(timer);
-  }, [centerTrigger, isMapReady, userLocation?.lat, userLocation?.lng, radiusKm]);
+  }, [centerTrigger, isMapReady, userLocation, radiusKm]);
 
   // Map Click Handler for manual point picking
   useEffect(() => {
@@ -246,6 +246,11 @@ export default function SafetyMap({
 
       map.on('dragstart', () => {
         userInteractedRef.current = true;
+      });
+      map.on('movestart', (e: any) => {
+        if (e.originalEvent) {
+          userInteractedRef.current = true;
+        }
       });
       map.on('zoomstart', (e: any) => {
         if (e.originalEvent) {
@@ -416,8 +421,9 @@ export default function SafetyMap({
       flugerZonesRef.current.push(ring30);
     }
 
+    // Smoothly pan to user only if user has not manually interacted with map. Never force zoom change on GPS updates.
     if (!userInteractedRef.current) {
-      map.setView(userLatLng, getZoomForRadius(radiusKm), { animate: true });
+      map.panTo(userLatLng, { animate: true, duration: 0.5 });
     }
   }, [isMapReady, userLocation, radiusKm, isRed, isOrange]);
 
@@ -520,33 +526,17 @@ export default function SafetyMap({
       }
     });
 
-    if (!userInteractedRef.current && activeThreats.length > 0) {
-      const coordPoints: [number, number][] = [userLatLng];
-      activeThreats.forEach(t => {
-        if (t.threatCoordinates) coordPoints.push([t.threatCoordinates.lat, t.threatCoordinates.lng]);
-      });
-
-      if (coordPoints.length > 1) {
-        const bounds = L.latLngBounds(coordPoints);
-        map.fitBounds(bounds.pad(0.25), { animate: true, maxZoom: 13 });
-      }
-    }
   }, [isMapReady, threats, userLocation, onSelectThreat]);
 
-  // Recenter handler
+  // Recenter handler («До мене») - smoothly returns to user GPS and sets comfortable zoom
   const handleRecenter = useCallback(() => {
     if (!mapInstanceRef.current || !userLocation) return;
     userInteractedRef.current = false;
     mapInstanceRef.current.invalidateSize();
-    if (radiusCircleRef.current) {
-      const bounds = radiusCircleRef.current.getBounds();
-      mapInstanceRef.current.fitBounds(bounds.pad(0.12), { animate: true, maxZoom: 14 });
-    } else {
-      mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
-        animate: true,
-        duration: 0.6
-      });
-    }
+    mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], getZoomForRadius(radiusKm), {
+      animate: true,
+      duration: 0.5
+    });
   }, [userLocation, radiusKm]);
 
   const handleZoomIn = useCallback(() => {
@@ -644,10 +634,12 @@ export default function SafetyMap({
 
         <button
           onClick={handleRecenter}
-          className="w-9 h-9 rounded-xl bg-[#0e1626]/95 hover:bg-slate-800 text-blue-400 border border-slate-700/80 shadow-xl backdrop-blur-md flex items-center justify-center transition-all active:scale-95"
-          title="Повернутися до моєї позиції"
+          className="h-9 px-2.5 rounded-xl bg-[#0e1626]/95 hover:bg-slate-800 text-blue-400 border border-slate-700/80 shadow-xl backdrop-blur-md flex items-center justify-center gap-1.5 transition-all active:scale-95 text-xs font-bold"
+          title="До мене (повернутися до моєї позиції)"
+          aria-label="До мене"
         >
-          <Crosshair className="w-4 h-4" />
+          <Crosshair className="w-4 h-4 shrink-0" />
+          <span className="text-[10px] font-bold tracking-tight">До мене</span>
         </button>
 
         <button

@@ -145,3 +145,56 @@ test('6. Moving User Logic: triggers re-alert when distance shrinks', () => {
   // User entered DANGER zone (<= 5 km from > 5 km)
   assert.equal(shouldReAlertMovingUser(6.0, 4.8), true);
 });
+
+test('7. Worker: GET /api/alerts/active returns live or open alerts payload with CORS', async () => {
+  const req = new Request('https://worker.local/api/alerts/active', { method: 'GET' });
+  const res = await worker.fetch(req, mockEnv, mockCtx);
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), '*');
+  const data: any = await res.json();
+  assert.ok(Array.isArray(data.alerts));
+  assert.ok(data.meta);
+});
+
+test('8. Worker: POST /api/alerts/all-clear purges tactical threats and resets cooldowns', async () => {
+  // First seed an active threat and device with cooldowns
+  const threat: ThreatEvent = {
+    id: 'test-threat-to-clear',
+    category: 'UAV_STRIKE',
+    title: 'Шахед над містом',
+    description: 'БпЛА в напрямку Київ',
+    lat: 50.4501,
+    lon: 30.5234,
+    radiusKm: 5.0,
+    timestampIso: new Date().toISOString()
+  };
+  await KvStorage.saveActiveThreats(mockEnv, [threat]);
+
+  const session = await KvStorage.getDevice(mockEnv, 'iphone-test-device');
+  if (session) {
+    session.alertCooldowns = { 'test-threat-to-clear': 3.5 };
+    session.dangerRepeatsDispatched = { 'test-threat-to-clear': true };
+    await KvStorage.saveDevice(mockEnv, session);
+  }
+
+  // Trigger all-clear
+  const req = new Request('https://worker.local/api/alerts/all-clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId: 'iphone-test-device', clearAll: true })
+  });
+  const res = await worker.fetch(req, mockEnv, mockCtx);
+  assert.equal(res.status, 200);
+  const data: any = await res.json();
+  assert.equal(data.success, true);
+  assert.ok(data.clearedThreats >= 1);
+
+  // Verify threats are cleared
+  const activeThreats = await KvStorage.getActiveThreats(mockEnv);
+  assert.equal(activeThreats.length, 0);
+
+  // Verify device cooldowns are cleared
+  const updatedSession = await KvStorage.getDevice(mockEnv, 'iphone-test-device');
+  assert.deepEqual(updatedSession?.alertCooldowns, {});
+  assert.deepEqual(updatedSession?.dangerRepeatsDispatched, {});
+});
+

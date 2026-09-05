@@ -404,10 +404,64 @@ export async function buildOfficialAlertsGeoJson(alerts: RawAlert[]): Promise<Of
     unmatched
   };
 
+  const geoJsonResult: GeoJsonFeatureCollection | null = renderedFeatures.length > 0 ? { type: 'FeatureCollection', features: renderedFeatures } : null;
+  lastRenderedAlertsGeoJson = geoJsonResult;
+
   return {
-    geoJson: renderedFeatures.length > 0 ? { type: 'FeatureCollection', features: renderedFeatures } : null,
+    geoJson: geoJsonResult,
     diagnostic
   };
+}
+
+let lastRenderedAlertsGeoJson: GeoJsonFeatureCollection | null = null;
+
+export function getLastRenderedAlertsGeoJson(): GeoJsonFeatureCollection | null {
+  return lastRenderedAlertsGeoJson;
+}
+
+export function isPointInPolygon(point: [number, number], ring: [number, number][]): boolean {
+  const x = point[0], y = point[1];
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function isPointInGeometry(point: [number, number], geometry: { type: string; coordinates: any }): boolean {
+  if (!geometry || !geometry.coordinates) return false;
+  if (geometry.type === 'Polygon') {
+    const rings = geometry.coordinates;
+    if (!rings || rings.length === 0) return false;
+    if (!isPointInPolygon(point, rings[0])) return false;
+    for (let h = 1; h < rings.length; h++) {
+      if (isPointInPolygon(point, rings[h])) return false;
+    }
+    return true;
+  }
+  if (geometry.type === 'MultiPolygon') {
+    for (const poly of geometry.coordinates) {
+      if (isPointInGeometry(point, { type: 'Polygon', coordinates: poly })) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function isCoordinateInRenderedAlert(lat: number, lng: number, geoJson?: GeoJsonFeatureCollection | null): boolean {
+  const collection = geoJson || lastRenderedAlertsGeoJson;
+  if (!collection || !collection.features || collection.features.length === 0) return false;
+  const pt: [number, number] = [lng, lat];
+  for (const feature of collection.features) {
+    if (isPointInGeometry(pt, feature.geometry)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function EMPTY_OFFICIAL_GEONT_DIAGNOSTIC(): OfficialAlertGeometryDiagnostic {
@@ -433,4 +487,6 @@ export function __clearOfficialGeometryCacheForTests(): void {
   cachedOblasts = null;
   cachedRaions = null;
   cachedHromadas = null;
+  lastRenderedAlertsGeoJson = null;
 }
+

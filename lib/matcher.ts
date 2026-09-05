@@ -129,7 +129,8 @@ export function evaluateLocalSecurity(
   telegramMessages: TelegramMessage[] = [],
   lastSuccessfulDataTs?: number,
   alertsStatus?: 'OK' | 'CACHE' | 'ERROR',
-  telegramMetrics?: Partial<TelegramIngestMetrics>
+  telegramMetrics?: Partial<TelegramIngestMetrics>,
+  lastAllClearTimestamp?: number
 ): SecurityEvaluationResult {
   const threatEvents: ThreatEvent[] = [];
   const rejectedMessagesLog: RejectedMessageItem[] = [];
@@ -209,6 +210,19 @@ export function evaluateLocalSecurity(
           reason: 'stale',
           reasonUk: 'Застаріле повідомлення (>30 хв)',
           detailsUk: `Надійшло ${Math.round((now - msgTs) / 60000)} хв тому`
+        });
+      }
+    } else if (lastAllClearTimestamp && lastAllClearTimestamp > 0 && msgTs <= lastAllClearTimestamp) {
+      if (rejectedMessagesLog.length < 30) {
+        rejectedMessagesLog.push({
+          id: m.id,
+          channel: m.channel,
+          channelTitle: m.channelTitle,
+          text: m.text,
+          timeIso: m.timeIso || new Date(msgTs).toISOString(),
+          reason: 'all_clear',
+          reasonUk: 'Відбій тривоги',
+          detailsUk: 'Загроза знята підтвердженим відбоєм'
         });
       }
     } else {
@@ -606,7 +620,10 @@ export function evaluateLocalSecurity(
     const key = `${ev.category}_${ev.detectedLocation.toLowerCase()}`;
     const existing = deduplicatedEventsMap.get(key);
     if (!existing) {
-      deduplicatedEventsMap.set(key, { ...ev });
+      const evConfirmedTs = new Date(ev.lastConfirmedAt).getTime();
+      const initialStatus = (lastAllClearTimestamp && evConfirmedTs <= lastAllClearTimestamp) ? 'cleared' : ev.status;
+      const initialBadge = initialStatus === 'cleared' ? 'Відбій / Загроза минула' : ev.statusBadgeUk;
+      deduplicatedEventsMap.set(key, { ...ev, status: initialStatus, statusBadgeUk: initialBadge });
     } else {
       const existingLastTs = new Date(existing.lastConfirmedAt).getTime();
       const incomingLastTs = new Date(ev.lastConfirmedAt).getTime();
@@ -622,7 +639,7 @@ export function evaluateLocalSecurity(
       let mergedStatus: EventStatus = 'active';
       let mergedBadgeUk = 'Активна ціль';
 
-      if (existing.status === 'cleared' || ev.status === 'cleared') {
+      if (existing.status === 'cleared' || ev.status === 'cleared' || (lastAllClearTimestamp && latestConfirmedTs <= lastAllClearTimestamp)) {
         mergedStatus = 'cleared';
         mergedBadgeUk = 'Відбій / Знищено у секторі';
       } else if (latestAgeMs > effectiveTtlMs) {

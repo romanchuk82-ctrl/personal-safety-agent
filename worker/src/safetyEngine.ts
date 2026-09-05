@@ -8,15 +8,18 @@ export class SafetyEngine {
    * Fetches official active air-raid alerts (alerts.in.ua with open feed fallback)
    */
   public static async fetchOfficialAlerts(env: Env): Promise<{ success: boolean; alerts: any[] }> {
-    const token = env.ALERTS_API_TOKEN;
+    const token = env.ALERTS_API_TOKEN || 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
     
     // Attempt 1: alerts.in.ua API (if token provided)
     if (token) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
-        const res = await fetch('https://api.alerts.in.ua/v1/alerts/active.json', {
-          headers: { 'X-API-Token': token },
+        const res = await fetch(`https://api.alerts.in.ua/v1/alerts/active.json?token=${token}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
+          },
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -235,4 +238,62 @@ export class SafetyEngine {
 
     return { evaluatedDevices: devices.length, alertsSent, health };
   }
+
+  /**
+   * Clears tactical threats and resets device cooldowns on official ALL-CLEAR.
+   * Ensures old threats are not restored.
+   */
+  public static async processAllClear(
+    env: Env,
+    payload: { deviceId?: string; locationTitle?: string; oblast?: string; clearAll?: boolean } = {}
+  ): Promise<{ clearedThreats: number; clearedDevices: number }> {
+    const activeThreats = await KvStorage.getActiveThreats(env);
+    let remainingThreats: ThreatEvent[] = [];
+    let clearedThreatsCount = 0;
+
+    const locMatch = (payload.locationTitle || '').toLowerCase().trim();
+    const obMatch = (payload.oblast || '').toLowerCase().trim();
+
+    if (payload.clearAll || (!locMatch && !obMatch)) {
+      clearedThreatsCount = activeThreats.length;
+      remainingThreats = [];
+    } else {
+      for (const t of activeThreats) {
+        const titleLower = (t.title || '').toLowerCase();
+        const descLower = (t.description || '').toLowerCase();
+        const matchesLoc = locMatch && (titleLower.includes(locMatch) || descLower.includes(locMatch));
+        const matchesOb = obMatch && (titleLower.includes(obMatch) || descLower.includes(obMatch));
+        if (matchesLoc || matchesOb) {
+          clearedThreatsCount++;
+        } else {
+          remainingThreats.push(t);
+        }
+      }
+    }
+
+    await KvStorage.saveActiveThreats(env, remainingThreats);
+
+    let clearedDevicesCount = 0;
+    if (payload.deviceId) {
+      const device = await KvStorage.getDevice(env, payload.deviceId);
+      if (device) {
+        device.alertCooldowns = {};
+        device.dangerRepeatsDispatched = {};
+        await KvStorage.saveDevice(env, device);
+        clearedDevicesCount++;
+      }
+    } else {
+      const devices = await KvStorage.getAllDevices(env);
+      for (const d of devices) {
+        d.alertCooldowns = {};
+        d.dangerRepeatsDispatched = {};
+        await KvStorage.saveDevice(env, d);
+        clearedDevicesCount++;
+      }
+    }
+
+    console.log(`[SafetyEngine] All-clear processed: purged ${clearedThreatsCount} threats, reset ${clearedDevicesCount} device cooldowns`);
+    return { clearedThreats: clearedThreatsCount, clearedDevices: clearedDevicesCount };
+  }
 }
+

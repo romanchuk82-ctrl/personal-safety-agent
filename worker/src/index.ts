@@ -97,6 +97,35 @@ export default {
           'X-Robots-Tag': 'noindex, nofollow'
         });
       }
+
+      // 1.3 Official Active Alerts Proxy (alerts.in.ua with CORS & Edge Caching)
+      if ((url.pathname === '/api/alerts/active' || url.pathname === '/api/alerts/official') && request.method === 'GET') {
+        const result = await SafetyEngine.fetchOfficialAlerts(env);
+        return jsonResponse({
+          alerts: result.alerts,
+          meta: {
+            last_updated_at: new Date().toISOString(),
+            type: 'full'
+          },
+          status: result.success ? 'OK' : 'ERROR',
+          source: 'alerts.in.ua'
+        }, result.success ? 200 : 502, {
+          'Cache-Control': 'public, max-age=5, s-maxage=10'
+        });
+      }
+
+      // 1.4 All-Clear & Tactical Threats Purge Endpoint
+      if (url.pathname === '/api/alerts/all-clear' && request.method === 'POST') {
+        const body: any = await request.json().catch(() => ({}));
+        const clearResult = await SafetyEngine.processAllClear(env, body);
+        return jsonResponse({
+          success: true,
+          message: 'All-clear confirmed: tactical threats purged and device cooldowns reset',
+          timestamp: Date.now(),
+          ...clearResult
+        });
+      }
+
       if (url.pathname === '/api/device/subscribe-push' && request.method === 'POST') {
         const body: any = await request.json().catch(() => ({}));
         const { deviceId, subscription, location } = body as {
