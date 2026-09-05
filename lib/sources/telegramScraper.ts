@@ -974,14 +974,19 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&nbsp;/g, ' ');
 }
 
+export interface FetchTelegramOptions {
+  force?: boolean;
+}
+
 export async function fetchChannelMessages(
-  channel: ChannelConfig
+  channel: ChannelConfig,
+  options?: FetchTelegramOptions
 ): Promise<{ messages: TelegramMessage[]; error?: string }> {
   const now = Date.now();
   const cached = telegramCache[channel.username];
 
-  // Quick 15-second cache per channel to prevent spamming
-  if (cached && (now - cached.timestamp) < 15000) {
+  // Quick 15-second cache per channel to prevent spamming unless force refresh is requested
+  if (!options?.force && cached && (now - cached.timestamp) < 15000) {
     return { messages: cached.messages };
   }
 
@@ -996,7 +1001,11 @@ export async function fetchChannelMessages(
   // Jina proxy with x-return-format: html provides high-speed, CORS-compliant HTML access
   fetchEndpoints.push({
     url: 'https://r.jina.ai/' + targetUrl,
-    headers: { 'x-return-format': 'html', 'Accept': 'text/html' }
+    headers: {
+      'x-return-format': 'html',
+      'Accept': 'text/html',
+      ...(options?.force ? { 'X-No-Cache': 'true', 'X-Cache-Tolerance': '0' } : {})
+    }
   });
   fetchEndpoints.push({
     url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl)
@@ -1011,7 +1020,8 @@ export async function fetchChannelMessages(
         headers: ep.headers || {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
-        signal: controller.signal
+        signal: controller.signal,
+        cache: options?.force ? 'no-store' : 'default'
       });
 
       clearTimeout(timeout);
@@ -1083,7 +1093,8 @@ export async function fetchChannelMessages(
 export async function fetchAllTelegramFeeds(
   userOblast?: string,
   _ignoredMaxParallel?: number,
-  customChannels: ChannelConfig[] = []
+  customChannels: ChannelConfig[] = [],
+  options?: FetchTelegramOptions
 ): Promise<{
   messages: TelegramMessage[];
   sourceStatus: Record<string, ChannelIngestStatus>;
@@ -1129,7 +1140,7 @@ export async function fetchAllTelegramFeeds(
   const CONCURRENCY = 4;
   for (let i = 0; i < channelsToQueryThisCycle.length; i += CONCURRENCY) {
     const chunk = channelsToQueryThisCycle.slice(i, i + CONCURRENCY);
-    const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch)));
+    const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch, options)));
     results.push(...chunkResults);
     if (i + CONCURRENCY < channelsToQueryThisCycle.length) {
       await new Promise(r => setTimeout(r, 60));

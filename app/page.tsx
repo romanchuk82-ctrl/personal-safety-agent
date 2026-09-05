@@ -120,6 +120,7 @@ export default function HomePage() {
   const [sourceStatuses, setSourceStatuses] = useState<Record<string, ChannelIngestStatus>>({});
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
+  const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
 
   // Initial and background high-frequency fetch of official alerts (7.5s loop for real-time accuracy within alerts.in.ua limits)
   useEffect(() => {
@@ -362,14 +363,14 @@ export default function HomePage() {
     );
   };
 
-  const performSecurityCheck = useCallback(async (currentLoc: TrustedLocation) => {
+  const performSecurityCheck = useCallback(async (currentLoc: TrustedLocation, options?: { force?: boolean }) => {
     if (isChecking) return;
     setIsChecking(true);
 
     try {
       const [alertsRes, tgRes] = await Promise.all([
-        fetchActiveAlerts(),
-        fetchAllTelegramFeeds(currentLoc.oblast, undefined, customChannels)
+        fetchActiveAlerts(undefined, { force: options?.force }),
+        fetchAllTelegramFeeds(currentLoc.oblast, undefined, customChannels, { force: options?.force })
       ]);
 
       const result = evaluateLocalSecurity(
@@ -421,12 +422,49 @@ export default function HomePage() {
           }
         }
       }
+
+      return { alertsRes, tgRes, result };
     } catch (error) {
       console.error('Security evaluation cycle error:', error);
+      throw error;
     } finally {
       setIsChecking(false);
     }
   }, [radiusKm, isChecking, speakAlert, customChannels, audioEnabled]);
+
+  const handleManualDataRefresh = useCallback(async () => {
+    if (isManualRefreshing || isChecking) return;
+    const targetLoc = trustedLocation || locationValidatorRef.current.getTrustedLocation();
+    if (!targetLoc) return;
+
+    setIsManualRefreshing(true);
+    setLocationSuccessNotice('↻ Оновлюю дані...');
+
+    try {
+      const outcome = await performSecurityCheck(targetLoc, { force: true });
+      if (outcome) {
+        const { alertsRes, tgRes } = outcome;
+        const alertsOk = alertsRes.status === 'OK' && alertsRes.diagnostic.sourceOnline;
+        const criticalHealthy = (tgRes.metrics?.criticalHealthy ?? 0) >= (tgRes.metrics?.criticalTotal ? Math.floor(tgRes.metrics.criticalTotal * 0.4) : 1);
+        const isFullSuccess = alertsOk && criticalHealthy && (tgRes.metrics?.healthyCount ?? 0) > 0;
+
+        if (isFullSuccess) {
+          setLocationSuccessNotice('✓ Дані оновлено щойно');
+        } else {
+          setLocationSuccessNotice('⚠️ Оновлено частково');
+        }
+      } else {
+        setLocationSuccessNotice('⚠️ Оновлено частково');
+      }
+      setTimeout(() => setLocationSuccessNotice(''), 3500);
+    } catch (err) {
+      console.error('Manual refresh error:', err);
+      setLocationSuccessNotice('⚠️ Оновлено частково');
+      setTimeout(() => setLocationSuccessNotice(''), 3500);
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  }, [isManualRefreshing, isChecking, trustedLocation, performSecurityCheck]);
 
   // Continuous background GPS feed to Location Confidence Layer
   const startContinuousGpsWatch = useCallback(() => {
@@ -1012,12 +1050,25 @@ export default function HomePage() {
                   <span className="font-bold text-white block">Радіус {radiusKm.toFixed(0)} км</span>
                   <span className="text-[10px] text-slate-400 font-mono">Флюгер Зона 1</span>
                 </div>
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ ДАНИХ</span>
-                  <span className={'font-mono font-bold block ' + (isDegraded ? 'text-amber-400' : 'text-white')}>
-                    {formattedDataFreshness}
-                  </span>
-                  <span className="text-[10px] text-emerald-400 font-mono">{monitoredSourcesCount} джерел</span>
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ ДАНИХ</span>
+                    <button
+                      type="button"
+                      onClick={handleManualDataRefresh}
+                      disabled={isManualRefreshing}
+                      className="p-1 -mr-1 -mt-1 rounded-lg text-cyan-400 hover:text-cyan-300 hover:bg-white/10 active:scale-95 disabled:opacity-60 transition-all flex items-center gap-1 text-[10px] font-mono font-bold"
+                      title="Примусово оновити всі дані зараз"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
+                    </button>
+                  </div>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className={'font-mono font-bold text-xs truncate ' + (isManualRefreshing ? 'text-cyan-300 animate-pulse' : isDegraded ? 'text-amber-400' : 'text-white')}>
+                      {isManualRefreshing ? '↻ Оновлюю...' : formattedDataFreshness}
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono shrink-0">{monitoredSourcesCount} джерел</span>
+                  </div>
                 </div>
                 <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
                   <span className="text-[10px] text-slate-400 block font-mono">🛡️ ГОЛОСОВИЙ РЕЖИМ</span>
@@ -1083,25 +1134,6 @@ export default function HomePage() {
                 )}
               </div>
             )}
-
-            {/* VOICE TEST BUTTONS */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={handleManualVoiceTest}
-                className="py-2.5 px-3 rounded-xl bg-[#0f1728] hover:bg-blue-950/80 text-blue-300 font-bold text-[11px] border border-blue-900/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
-              >
-                <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-                <span>ТЕСТ ГОЛОСУ 🔊</span>
-              </button>
-
-              <button
-                onClick={startEmergencyPushTest}
-                className="py-2.5 px-3 rounded-xl bg-[#141822] hover:bg-amber-950/80 text-amber-300 font-bold text-[11px] border border-amber-900/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
-              >
-                <Bell className="w-3.5 h-3.5 text-amber-400" />
-                <span>ТЕСТ НА ЕКРАНІ 🔒</span>
-              </button>
-            </div>
           </div>
 
           {/* ON-DEMAND GPS: "📍 ДЕ Я ЗАРАЗ" */}

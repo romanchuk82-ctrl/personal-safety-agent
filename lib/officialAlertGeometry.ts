@@ -125,11 +125,12 @@ function findExactGeometry(documentNode: Document, descriptor: OfficialGeometryD
 function styleGeometry(root: Element): void {
   const drawable = root.matches('path,polygon,polyline') ? [root] : Array.from(root.querySelectorAll('path,polygon,polyline'));
   drawable.forEach(node => {
-    node.setAttribute('fill', '#dc2626');
-    node.setAttribute('fill-opacity', '0.42');
-    node.setAttribute('stroke', '#ff4d5e');
-    node.setAttribute('stroke-width', '7');
-    node.setAttribute('stroke-opacity', '0.98');
+    node.setAttribute('fill', '#991b1b');
+    node.setAttribute('fill-opacity', '0.22');
+    node.setAttribute('stroke', '#dc2626');
+    node.setAttribute('stroke-width', '1');
+    node.setAttribute('stroke-opacity', '0.7');
+    node.setAttribute('stroke-linejoin', 'round');
     node.setAttribute('vector-effect', 'non-scaling-stroke');
   });
 }
