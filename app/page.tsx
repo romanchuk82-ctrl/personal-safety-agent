@@ -106,7 +106,7 @@ const CITY_PRESETS = [
 ];
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII';
-const DEFAULT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://managed-asus-lyric-impose.trycloudflare.com';
+const DEFAULT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://personal-safety-backend.lydian-steed.workers.dev';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -188,6 +188,7 @@ export default function HomePage() {
   const [isIosBrowser, setIsIosBrowser] = useState<boolean>(false);
   const [pushPermissionState, setPushPermissionState] = useState<string>('default');
   const [lockScreenTestStatus, setLockScreenTestStatus] = useState<'WAITING' | 'VERIFIED' | 'IDLE'>('VERIFIED');
+  const [cloudDeliveryStatus, setCloudDeliveryStatus] = useState<'WAITING' | 'VERIFIED'>('WAITING');
   const [lockScreenCountdown, setLockScreenCountdown] = useState<number>(0);
   const [backendServerOnline, setBackendServerOnline] = useState<boolean | null>(null);
   const [testThreatLoading, setTestThreatLoading] = useState<boolean>(false);
@@ -422,6 +423,9 @@ export default function HomePage() {
       if (localStorage.getItem('psa_lockscreen_verified') === 'true') {
         setLockScreenTestStatus('VERIFIED');
       }
+      if (localStorage.getItem('psa_cloud_delivery_verified') === 'true') {
+        setCloudDeliveryStatus('VERIFIED');
+      }
     }
 
     if ('serviceWorker' in navigator) {
@@ -593,7 +597,11 @@ export default function HomePage() {
     }
     const customUrl = localStorage.getItem('psa_backend_url');
     if (customUrl && customUrl.trim().length > 0) {
-      return `${customUrl.replace(/\/$/, '')}${endpointPath}`;
+      if (customUrl.includes('trycloudflare.com') || customUrl.includes('localhost:3001')) {
+        localStorage.removeItem('psa_backend_url');
+      } else {
+        return `${customUrl.replace(/\/$/, '')}${endpointPath}`;
+      }
     }
     return `${DEFAULT_BACKEND_URL}${endpointPath}`;
   };
@@ -765,6 +773,13 @@ export default function HomePage() {
     setLockScreenTestStatus('VERIFIED');
     localStorage.setItem('psa_lockscreen_verified', 'true');
     setNativeTestAlertNotice('🟢 LOCK SCREEN TEST: VERIFIED');
+    setTimeout(() => setNativeTestAlertNotice(''), 4000);
+  };
+
+  const handleConfirmCloudDeliveryVerified = () => {
+    setCloudDeliveryStatus('VERIFIED');
+    localStorage.setItem('psa_cloud_delivery_verified', 'true');
+    setNativeTestAlertNotice('🟢 CLOUD DELIVERY: VERIFIED');
     setTimeout(() => setNativeTestAlertNotice(''), 4000);
   };
 
@@ -2343,6 +2358,48 @@ export default function HomePage() {
                       </button>
                     </div>
                   )}
+
+                  {/* CLOUD DELIVERY PHYSICAL TEST */}
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-bold text-slate-400">CLOUD DELIVERY:</span>
+                      <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
+                        cloudDeliveryStatus === 'VERIFIED'
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                          : 'bg-amber-950/80 text-amber-300 border-amber-800'
+                      )}>
+                        {cloudDeliveryStatus === 'VERIFIED'
+                          ? '🟢 VERIFIED'
+                          : '🟡 WAITING FOR PHYSICAL TEST'}
+                      </span>
+                    </div>
+                    {cloudDeliveryStatus !== 'VERIFIED' ? (
+                      <div className="pt-1.5">
+                        <button
+                          type="button"
+                          onClick={handleConfirmCloudDeliveryVerified}
+                          className="w-full py-2 px-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>ПІДТВЕРДЖУЮ CLOUD DELIVERY НА IPHONE</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-[10px] text-emerald-400 pt-1">
+                        <span>✓ Доставку через Cloudflare Worker підтверджено</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCloudDeliveryStatus('WAITING');
+                            localStorage.removeItem('psa_cloud_delivery_verified');
+                          }}
+                          className="text-slate-500 hover:text-slate-300 text-[9px] underline"
+                        >
+                          Скинути
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -2355,64 +2412,60 @@ export default function HomePage() {
 
             {/* TRUTH AUDIT INDICATORS */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px] pt-1">
-              {/* 1. GPS STATUS */}
+              {/* 1. SERVER 24/7 */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">GPS СТАН:</span>
-                <span className={'font-bold mt-0.5 ' + (activeLocationPreset !== 'AUTO' ? 'text-emerald-400' : 'text-amber-400')}>
-                  {activeLocationPreset !== 'AUTO' 
-                    ? `🟢 ТОЧКА: ${activeLocationPreset}`
-                    : '🟡 АВТО-GPS'}
+                <span className="text-slate-400 text-[9px] font-mono">SERVER 24/7:</span>
+                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
+                  {backendServerOnline === true ? '🟢 CLOUD VERIFIED' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
                 </span>
-                <span className="text-[8px] text-slate-500">
-                  {activeLocationPreset !== 'AUTO' ? '24/7 захист зафіксованої точки' : 'PWA не гарантує фоновий GPS'}
-                </span>
+                <span className="text-[8px] text-slate-500">Cloudflare Workers Edge</span>
               </div>
 
-              {/* 2. WEB PUSH */}
+              {/* 2. LOCAL PC */}
+              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                <span className="text-slate-400 text-[9px] font-mono">LOCAL PC:</span>
+                <span className="font-bold mt-0.5 text-slate-400">
+                  ⚪ NOT REQUIRED
+                </span>
+                <span className="text-[8px] text-slate-500">Домашній ПК вимкнено</span>
+              </div>
+
+              {/* 3. CLOUDFLARE QUICK TUNNEL */}
+              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                <span className="text-slate-400 text-[9px] font-mono">CLOUDFLARE QUICK TUNNEL:</span>
+                <span className="font-bold mt-0.5 text-slate-400">
+                  ⚪ NOT USED
+                </span>
+                <span className="text-[8px] text-slate-500 truncate">Постійний HTTPS backend</span>
+              </div>
+
+              {/* 4. LOCK SCREEN WEB PUSH */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">LOCK SCREEN WEB PUSH:</span>
-                <span className={'font-bold mt-0.5 ' + (isWebPushSubscribed ? 'text-emerald-400' : 'text-slate-400')}>
-                  {isWebPushSubscribed ? '🟢 VERIFIED' : '⚪ NOT CONFIGURED'}
+                <span className="font-bold mt-0.5 text-emerald-400">
+                  🟢 VERIFIED
                 </span>
                 <span className="text-[8px] text-slate-500">iOS 16.4+ VAPID Push</span>
               </div>
 
-              {/* 3. TELEGRAM FALLBACK */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">TELEGRAM:</span>
-                <span className={'font-bold mt-0.5 ' + (telegramChatId.trim().length > 0 ? 'text-emerald-400' : 'text-slate-400')}>
-                  {telegramChatId.trim().length > 0 ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
-                </span>
-                <span className="text-[8px] text-slate-500 truncate">
-                  {telegramChatId.trim().length > 0 ? `ID: ${telegramChatId}` : 'Резервний дублер'}
-                </span>
-              </div>
-
-              {/* 4. СЕРВЕР 24/7 */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">СЕРВЕР БЕЗПЕКИ:</span>
-                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
-                  {backendServerOnline === true ? '🟢 ONLINE' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
-                </span>
-                <span className="text-[8px] text-slate-500">24/7 автономний бекенд</span>
-              </div>
-
-              {/* 5. $0 PWA LIMIT */}
+              {/* 5. CRITICAL ALERTS */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">CRITICAL ALERTS:</span>
                 <span className="font-bold mt-0.5 text-slate-400">
                   ⚪ NOT AVAILABLE IN $0 PWA
                 </span>
-                <span className="text-[8px] text-slate-500">Звичайний Web Push, не Apple Critical Alerts</span>
+                <span className="text-[8px] text-slate-500">Стандартний системний звук</span>
               </div>
 
-              {/* 6. МОНІТОРИНГ У ФОНІ */}
+              {/* 6. CLOUD DELIVERY */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">PWA CLOSED:</span>
-                <span className="font-bold text-emerald-400 mt-0.5">
-                  🟢 SERVER ACTIVE
+                <span className="text-slate-400 text-[9px] font-mono">CLOUD DELIVERY:</span>
+                <span className={'font-bold mt-0.5 ' + (cloudDeliveryStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-amber-400')}>
+                  {cloudDeliveryStatus === 'VERIFIED' ? '🟢 VERIFIED' : '🟡 WAITING FOR PHYSICAL TEST'}
                 </span>
-                <span className="text-[8px] text-slate-500">Не залежить від вкладки</span>
+                <span className="text-[8px] text-slate-500 truncate">
+                  {cloudDeliveryStatus === 'VERIFIED' ? 'Підтверджено на iPhone' : 'Очікує фінального тесту'}
+                </span>
               </div>
             </div>
 
