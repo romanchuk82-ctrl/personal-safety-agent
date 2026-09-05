@@ -947,6 +947,7 @@ export interface TelegramIngestMetrics {
   monitoredSources: number;
   healthyCount: number;
   unavailableCount: number;
+  timeoutCount?: number;
   disabledCount: number;
   userPriorityTotal: number;
   userPriorityHealthy: number;
@@ -962,6 +963,7 @@ export interface TelegramIngestMetrics {
   lastSuccessfulCycleTs: number;
   lastRealDataTimestamp: number;
   lastRealDataIso: string | null;
+  refreshDiagnostics?: RefreshDiagnostics;
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -974,21 +976,62 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&nbsp;/g, ' ');
 }
 
+export interface RefreshDiagnostics {
+  startedAt: number;
+  finishedAt: number;
+  durationMs: number;
+  successfulSources: number;
+  timeoutSources: number;
+  failedSources: number;
+  totalSources: number;
+  status: 'full' | 'partial' | 'timeout' | 'failed';
+  statusSummaryUk: string;
+  stageProgress: {
+    userPriority: 'done' | 'partial' | 'timeout' | 'pending';
+    critical: 'done' | 'partial' | 'timeout' | 'pending';
+    officialAlerts: 'done' | 'error' | 'timeout' | 'pending';
+    otherSources: 'done' | 'partial' | 'timeout' | 'pending';
+  };
+}
+
 export interface FetchTelegramOptions {
   force?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface FetchChannelResult {
+  messages: TelegramMessage[];
+  error?: string;
+  statusCategory: 'healthy' | 'timeout' | 'unavailable';
+  durationMs: number;
 }
 
 export async function fetchChannelMessages(
   channel: ChannelConfig,
   options?: FetchTelegramOptions
-): Promise<{ messages: TelegramMessage[]; error?: string }> {
+): Promise<FetchChannelResult> {
   const now = Date.now();
   const cached = telegramCache[channel.username];
+  const startTime = Date.now();
 
   // Rate-limit safety: 15s normal cycle, 6s forced refresh threshold to prevent proxy rate-limiting
   const minInterval = options?.force ? 6000 : 15000;
   if (cached && (now - cached.timestamp) < minInterval) {
-    return { messages: cached.messages };
+    return {
+      messages: cached.messages,
+      statusCategory: 'healthy',
+      durationMs: 0
+    };
+  }
+
+  if (options?.signal?.aborted) {
+    return {
+      messages: cached?.messages || [],
+      error: 'Запит скасовано за таймаутом',
+      statusCategory: 'timeout',
+      durationMs: 0
+    };
   }
 
   const cleanUser = channel.username.trim().replace(/^@/, '');
@@ -1012,11 +1055,24 @@ export async function fetchChannelMessages(
     url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl)
   });
 
-  for (const ep of fetchEndpoints) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000);
+  const endpointTimeoutMs = options?.timeoutMs || (options?.force ? 3000 : 4500);
+  let isTimeout = false;
 
+  for (const ep of fetchEndpoints) {
+    if (options?.signal?.aborted) {
+      isTimeout = true;
+      break;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), endpointTimeoutMs);
+
+    const abortHandler = () => controller.abort();
+    if (options?.signal) {
+      options.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+
+    try {
       const res = await fetch(ep.url, {
         headers: ep.headers || {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1025,7 +1081,10 @@ export async function fetchChannelMessages(
         cache: options?.force ? 'no-store' : 'default'
       });
 
-      clearTimeout(timeout);
+      clearTimeout(timer);
+      if (options?.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
 
       if (res.ok) {
         const html = await res.text();
@@ -1077,18 +1136,41 @@ export async function fetchChannelMessages(
             timestamp: now,
             lastSuccessIso: new Date(now).toISOString()
           };
-          return { messages: recent };
+          return {
+            messages: recent,
+            statusCategory: 'healthy',
+            durationMs: Date.now() - startTime
+          };
         }
       }
-    } catch (err) {
-      // Try next candidate proxy
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || options?.signal?.aborted) {
+        isTimeout = true;
+      }
+    } finally {
+      clearTimeout(timer);
+      if (options?.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
     }
   }
 
+  const durationMs = Date.now() - startTime;
   if (cached && cached.messages.length > 0) {
-    return { messages: cached.messages, error: 'Кеш (останнє оновлення)' };
+    return {
+      messages: cached.messages,
+      error: isTimeout ? 'Таймаут (використано кеш)' : 'Кеш (останнє оновлення)',
+      statusCategory: isTimeout ? 'timeout' : 'healthy',
+      durationMs
+    };
   }
-  return { messages: [], error: 'Тимчасово не відповідає' };
+
+  return {
+    messages: [],
+    error: isTimeout ? 'Таймаут з’єднання' : 'Тимчасово не відповідає',
+    statusCategory: isTimeout ? 'timeout' : 'unavailable',
+    durationMs
+  };
 }
 
 export async function fetchAllTelegramFeeds(
@@ -1110,11 +1192,11 @@ export async function fetchAllTelegramFeeds(
   // All channels in the cleaned catalog are verified to have web preview
   const activeChannels = allAvailable.filter(c => c.enabled !== false);
 
-  // TIERED POLLING ARCHITECTURE:
-  // 1. USER PRIORITY CHANNELS - ALWAYS POLLED EVERY CYCLE
+  // STRICT TIERED EXECUTION:
+  // 1. USER PRIORITY CHANNELS (Tier 1 - Highest priority)
   const userPriorityChannels = activeChannels.filter(c => c.tier === 'USER_PRIORITY');
 
-  // 2. CRITICAL CHANNELS - ALWAYS POLLED EVERY CYCLE
+  // 2. CRITICAL CHANNELS (Tier 2 - National radar and strategic command)
   const criticalChannels = activeChannels.filter(c => c.tier === 'CRITICAL');
 
   // Set of all mandatory "Every Cycle" channels
@@ -1123,68 +1205,113 @@ export async function fetchAllTelegramFeeds(
     ...criticalChannels.map(c => c.username.toLowerCase())
   ]);
 
-  // 3. REGIONAL / OTHER CHANNELS - POLLED IN ROTATING BATCHES
+  // 3. REGIONAL / OTHER CHANNELS (Tier 3 - Polled in rotating batches)
   const regionalChannels = activeChannels.filter(c => !mandatoryUsernames.has(c.username.toLowerCase()));
   const BATCH_SIZE = 15;
   const startIndex = (rollingBatchIndex * BATCH_SIZE) % Math.max(1, regionalChannels.length);
   const selectedBatch = regionalChannels.slice(startIndex, startIndex + BATCH_SIZE);
   rollingBatchIndex = (rollingBatchIndex + 1) % Math.max(1, Math.ceil(regionalChannels.length / BATCH_SIZE));
 
-  const channelsToQueryThisCycle = [
-    ...userPriorityChannels,
-    ...criticalChannels,
-    ...selectedBatch
-  ];
+  const CONCURRENCY = 4;
+  let timeoutSourcesCount = 0;
+  let failedSourcesCount = 0;
 
-  // Concurrently fetch this cycle's channels with concurrency throttling (chunks of 3)
-  const results: PromiseSettledResult<{ messages: TelegramMessage[]; error?: string }>[] = [];
-  const CONCURRENCY = 3;
-  for (let i = 0; i < channelsToQueryThisCycle.length; i += CONCURRENCY) {
-    const chunk = channelsToQueryThisCycle.slice(i, i + CONCURRENCY);
-    const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch, options)));
-    results.push(...chunkResults);
-    if (i + CONCURRENCY < channelsToQueryThisCycle.length) {
-      await new Promise(r => setTimeout(r, 120));
+  // Helper to fetch a channel list in parallel chunks of CONCURRENCY
+  const fetchChannelTier = async (channels: ChannelConfig[]) => {
+    for (let i = 0; i < channels.length; i += CONCURRENCY) {
+      if (options?.signal?.aborted) {
+        // Mark remaining in tier as timeout/skipped immediately
+        for (let j = i; j < channels.length; j++) {
+          const ch = channels[j];
+          if (!sourceStatus[ch.username]) {
+            const cached = telegramCache[ch.username];
+            if (cached && cached.messages.length > 0) {
+              cached.messages.forEach(m => allMessagesMap.set(m.id, m));
+            }
+            sourceStatus[ch.username] = {
+              channel: ch.username,
+              title: ch.title,
+              ok: (cached?.messages.length ?? 0) > 0,
+              count: cached?.messages.length || 0,
+              lastMessageText: cached?.messages[cached.messages.length - 1]?.text,
+              lastMessageTimeIso: cached?.messages[cached.messages.length - 1]?.timeIso,
+              lastMessageId: cached?.messages[cached.messages.length - 1]?.id,
+              lastCheckTimestamp: cached?.timestamp || now,
+              error: 'Таймаут (ліміт часу перевищено)',
+              tier: ch.tier,
+              hasWebPreview: true,
+              statusCategory: 'unavailable'
+            };
+            timeoutSourcesCount++;
+          }
+        }
+        break;
+      }
+
+      const chunk = channels.slice(i, i + CONCURRENCY);
+      const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch, options)));
+
+      chunkResults.forEach((res, idx) => {
+        const ch = chunk[idx];
+        if (res.status === 'fulfilled') {
+          const { messages, error, statusCategory } = res.value;
+          messages.forEach(m => allMessagesMap.set(m.id, m));
+          const latestMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
+          const isOk = messages.length > 0 && statusCategory === 'healthy';
+
+          if (statusCategory === 'timeout') timeoutSourcesCount++;
+          else if (!isOk) failedSourcesCount++;
+
+          sourceStatus[ch.username] = {
+            channel: ch.username,
+            title: ch.title,
+            ok: isOk,
+            count: messages.length,
+            lastMessageText: latestMsg?.text,
+            lastMessageTimeIso: latestMsg?.timeIso,
+            lastMessageId: latestMsg?.id,
+            lastCheckTimestamp: now,
+            error: isOk ? undefined : (error || 'Немає свіжих повідомлень'),
+            tier: ch.tier,
+            hasWebPreview: true,
+            statusCategory: isOk ? 'healthy' : (statusCategory === 'timeout' ? 'unavailable' : 'unavailable')
+          };
+        } else {
+          failedSourcesCount++;
+          sourceStatus[ch.username] = {
+            channel: ch.username,
+            title: ch.title,
+            ok: false,
+            count: 0,
+            lastCheckTimestamp: now,
+            error: res.reason?.message || 'Помилка з’єднання',
+            tier: ch.tier,
+            hasWebPreview: true,
+            statusCategory: 'unavailable'
+          };
+        }
+      });
+
+      if (i + CONCURRENCY < channels.length && !options?.signal?.aborted) {
+        await new Promise(r => setTimeout(r, 40));
+      }
     }
+  };
+
+  // 1. TIER 1: USER PRIORITY FIRST
+  await fetchChannelTier(userPriorityChannels);
+
+  // 2. TIER 2: CRITICAL SECOND
+  if (!options?.signal?.aborted) {
+    await fetchChannelTier(criticalChannels);
   }
 
-  results.forEach((res, idx) => {
-    const ch = channelsToQueryThisCycle[idx];
-    if (res.status === 'fulfilled') {
-      const { messages, error } = res.value;
-      messages.forEach(m => allMessagesMap.set(m.id, m));
-      const latestMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
-      const isOk = messages.length > 0;
-      sourceStatus[ch.username] = {
-        channel: ch.username,
-        title: ch.title,
-        ok: isOk,
-        count: messages.length,
-        lastMessageText: latestMsg?.text,
-        lastMessageTimeIso: latestMsg?.timeIso,
-        lastMessageId: latestMsg?.id,
-        lastCheckTimestamp: now,
-        error: isOk ? undefined : (error || 'Немає свіжих повідомлень'),
-        tier: ch.tier,
-        hasWebPreview: true,
-        statusCategory: isOk ? 'healthy' : 'unavailable'
-      };
-    } else {
-      sourceStatus[ch.username] = {
-        channel: ch.username,
-        title: ch.title,
-        ok: false,
-        count: 0,
-        lastCheckTimestamp: now,
-        error: res.reason?.message || 'Помилка з’єднання',
-        tier: ch.tier,
-        hasWebPreview: true,
-        statusCategory: 'unavailable'
-      };
-    }
-  });
+  // 3. TIER 3: REGIONAL BATCH THIRD
+  if (!options?.signal?.aborted) {
+    await fetchChannelTier(selectedBatch);
+  }
 
-  // Pull existing cache for regional channels not queried in this specific micro-cycle
+  // Populate remaining regional channels from cache
   regionalChannels.forEach(ch => {
     if (!sourceStatus[ch.username]) {
       const cached = telegramCache[ch.username];
@@ -1255,6 +1382,7 @@ export async function fetchAllTelegramFeeds(
     monitoredSources: activeChannels.length,
     healthyCount,
     unavailableCount,
+    timeoutCount: timeoutSourcesCount,
     disabledCount: 0,
     userPriorityTotal,
     userPriorityHealthy,

@@ -30,7 +30,11 @@ export interface AlertsDiagnostic {
   usedProxy?: string;
 }
 
-export interface FetchActiveAlertsOptions { force?: boolean; }
+export interface FetchActiveAlertsOptions {
+  force?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 
 export let lastAlertsFetchDiagnostic: AlertsDiagnostic = {
   sourceOnline: false,
@@ -86,16 +90,35 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
   });
   endpoints.push({ name: 'allorigins', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}` });
 
+  const endpointTimeoutMs = options.timeoutMs || (options.force ? 3200 : 4500);
   const failures: string[] = [];
+
   for (const endpoint of endpoints) {
+    if (options.signal?.aborted) {
+      failures.push(`${endpoint.name}: aborted by signal`);
+      break;
+    }
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6500);
+    const timer = setTimeout(() => controller.abort(), endpointTimeoutMs);
+    const abortHandler = () => controller.abort();
+
+    if (options.signal) {
+      options.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+
     try {
       const response = await fetch(endpoint.url, {
         headers: endpoint.headers,
         signal: controller.signal,
         cache: 'no-store'
       });
+
+      clearTimeout(timer);
+      if (options.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const json = await response.json();
       const { alerts, sourceUpdatedIso = new Date().toISOString() } = parsePayload(endpoint.isJina ? json?.data?.content : json);
@@ -117,10 +140,13 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
       };
       lastAlertsFetchDiagnostic = diagnostic;
       return { alerts, status: 'OK', diagnostic };
-    } catch (error) {
+    } catch (error: any) {
       failures.push(`${endpoint.name}: ${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(timer);
+      if (options.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
     }
   }
 

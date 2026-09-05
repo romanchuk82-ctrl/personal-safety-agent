@@ -58,7 +58,7 @@ import {
   OfficialAlertGeometryDiagnostic,
   officialLocationTypeLabel
 } from '@/lib/officialAlertGeometry';
-import { fetchAllTelegramFeeds, MONITORED_CHANNELS, USER_PRIORITY_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics } from '@/lib/sources/telegramScraper';
+import { fetchAllTelegramFeeds, MONITORED_CHANNELS, USER_PRIORITY_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics, RefreshDiagnostics } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
 import { unlockAudioAndSpeech, speakUkrainian, stopAllAudio } from '@/lib/soundService';
@@ -121,6 +121,7 @@ export default function HomePage() {
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const [voiceStatusMessage, setVoiceStatusMessage] = useState<string>('');
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
+  const [lastRefreshDiagnostics, setLastRefreshDiagnostics] = useState<RefreshDiagnostics | null>(null);
 
   // Initial and background high-frequency fetch of official alerts (7.5s loop for real-time accuracy within alerts.in.ua limits)
   useEffect(() => {
@@ -363,14 +364,30 @@ export default function HomePage() {
     );
   };
 
-  const performSecurityCheck = useCallback(async (currentLoc: TrustedLocation, options?: { force?: boolean }) => {
+  const performSecurityCheck = useCallback(async (
+    currentLoc: TrustedLocation,
+    options?: {
+      force?: boolean;
+      signal?: AbortSignal;
+      startedAt?: number;
+    }
+  ) => {
     if (isChecking) return;
     setIsChecking(true);
+    const checkStartTime = options?.startedAt || Date.now();
 
     try {
       const [alertsRes, tgRes] = await Promise.all([
-        fetchActiveAlerts(undefined, { force: options?.force }),
-        fetchAllTelegramFeeds(currentLoc.oblast, undefined, customChannels, { force: options?.force })
+        fetchActiveAlerts(undefined, {
+          force: options?.force,
+          signal: options?.signal,
+          timeoutMs: options?.force ? 3200 : 4500
+        }),
+        fetchAllTelegramFeeds(currentLoc.oblast, undefined, customChannels, {
+          force: options?.force,
+          signal: options?.signal,
+          timeoutMs: options?.force ? 3000 : 4500
+        })
       ]);
 
       const result = evaluateLocalSecurity(
@@ -413,6 +430,57 @@ export default function HomePage() {
         lastRealDataIso: result.lastRealDataIso
       });
 
+      // Compute diagnostics
+      const checkEndTime = Date.now();
+      const durationMs = checkEndTime - checkStartTime;
+      const alertsOk = alertsRes.status === 'OK' && alertsRes.diagnostic.sourceOnline;
+      const successfulSources = (alertsOk ? 1 : 0) + (tgRes.metrics?.healthyCount ?? 0);
+      const timeoutSources = (alertsRes.status === 'ERROR' && alertsRes.diagnostic.errorDetails?.includes('aborted') ? 1 : 0) + (tgRes.metrics?.timeoutCount ?? 0);
+      const totalSources = 1 + (tgRes.metrics?.totalSources ?? 0);
+      const failedSources = Math.max(0, totalSources - successfulSources - timeoutSources);
+
+      const userPriorityHealthy = (tgRes.metrics?.userPriorityHealthy ?? 0);
+      const userPriorityTotal = (tgRes.metrics?.userPriorityTotal ?? 11);
+      const criticalHealthy = (tgRes.metrics?.criticalHealthy ?? 0);
+      const criticalTotal = (tgRes.metrics?.criticalTotal ?? 21);
+
+      const isFullSuccess = alertsOk &&
+        userPriorityHealthy >= Math.max(1, userPriorityTotal - 2) &&
+        criticalHealthy >= Math.floor(criticalTotal * 0.4) &&
+        timeoutSources === 0;
+
+      const diagStatus: 'full' | 'partial' | 'timeout' | 'failed' = options?.signal?.aborted
+        ? 'timeout'
+        : isFullSuccess
+        ? 'full'
+        : successfulSources > 0
+        ? 'partial'
+        : 'failed';
+
+      const diagSummaryUk = isFullSuccess
+        ? `Оновлено всі ключові джерела (${successfulSources}/${totalSources})`
+        : `Оновлено ${successfulSources}/${totalSources} джерел${timeoutSources > 0 ? `, ${timeoutSources} timeout` : ''}`;
+
+      const diagnostics: RefreshDiagnostics = {
+        startedAt: checkStartTime,
+        finishedAt: checkEndTime,
+        durationMs,
+        successfulSources,
+        timeoutSources,
+        failedSources,
+        totalSources,
+        status: diagStatus,
+        statusSummaryUk: diagSummaryUk,
+        stageProgress: {
+          userPriority: userPriorityHealthy === userPriorityTotal ? 'done' : userPriorityHealthy > 0 ? 'partial' : 'timeout',
+          critical: criticalHealthy >= (criticalTotal * 0.5) ? 'done' : criticalHealthy > 0 ? 'partial' : 'timeout',
+          officialAlerts: alertsOk ? 'done' : alertsRes.diagnostic.errorDetails?.includes('aborted') ? 'timeout' : 'error',
+          otherSources: (tgRes.metrics?.regionalHealthy ?? 0) > 0 ? 'done' : 'partial'
+        }
+      };
+
+      setLastRefreshDiagnostics(diagnostics);
+
       // TRIGGER VOICE ANNOUNCEMENT ON RED THREAT
       if (result.overallState === 'RED' && result.primaryThreat) {
         if (lastSpokenAlertIdRef.current !== result.primaryThreat.id) {
@@ -423,7 +491,7 @@ export default function HomePage() {
         }
       }
 
-      return { alertsRes, tgRes, result };
+      return { alertsRes, tgRes, result, diagnostics };
     } catch (error) {
       console.error('Security evaluation cycle error:', error);
       throw error;
@@ -440,28 +508,46 @@ export default function HomePage() {
     setIsManualRefreshing(true);
     setLocationSuccessNotice('↻ Оновлюю дані...');
 
-    try {
-      const outcome = await performSecurityCheck(targetLoc, { force: true });
-      if (outcome) {
-        const { alertsRes, tgRes } = outcome;
-        const alertsOk = alertsRes.status === 'OK' && alertsRes.diagnostic.sourceOnline;
-        const criticalHealthy = (tgRes.metrics?.criticalHealthy ?? 0) >= (tgRes.metrics?.criticalTotal ? Math.floor(tgRes.metrics.criticalTotal * 0.4) : 1);
-        const isFullSuccess = alertsOk && criticalHealthy && (tgRes.metrics?.healthyCount ?? 0) > 0;
+    const startedAt = Date.now();
+    const abortController = new AbortController();
 
-        if (isFullSuccess) {
+    // STRICT HARD TIMEOUT: Guaranteed abort before 30 seconds
+    const hardTimeoutTimer = setTimeout(() => {
+      console.warn('Manual refresh exceeded 28.5s hard limit - triggering abort');
+      abortController.abort();
+    }, 28500);
+
+    try {
+      const refreshPromise = performSecurityCheck(targetLoc, {
+        force: true,
+        signal: abortController.signal,
+        startedAt
+      });
+
+      const fallbackTimeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 29500);
+      });
+
+      const outcome = await Promise.race([refreshPromise, fallbackTimeoutPromise]);
+
+      if (outcome && outcome.diagnostics) {
+        const diag = outcome.diagnostics;
+        if (diag.status === 'full') {
           setLocationSuccessNotice('✓ Дані оновлено щойно');
         } else {
-          setLocationSuccessNotice('⚠️ Оновлено частково');
+          setLocationSuccessNotice(`⚠️ Оновлено частково (${diag.successfulSources}/${diag.totalSources} джерел${diag.timeoutSources > 0 ? `, ${diag.timeoutSources} timeout` : ''})`);
         }
       } else {
-        setLocationSuccessNotice('⚠️ Оновлено частково');
+        // Exceeded 29.5s race window
+        setLocationSuccessNotice('⚠️ Оновлено частково (таймаут 30с)');
       }
-      setTimeout(() => setLocationSuccessNotice(''), 3500);
+      setTimeout(() => setLocationSuccessNotice(''), 4000);
     } catch (err) {
       console.error('Manual refresh error:', err);
       setLocationSuccessNotice('⚠️ Оновлено частково');
-      setTimeout(() => setLocationSuccessNotice(''), 3500);
+      setTimeout(() => setLocationSuccessNotice(''), 4000);
     } finally {
+      clearTimeout(hardTimeoutTimer);
       setIsManualRefreshing(false);
     }
   }, [isManualRefreshing, isChecking, trustedLocation, performSecurityCheck]);
@@ -1136,25 +1222,46 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* ON-DEMAND GPS: "📍 ДЕ Я ЗАРАЗ" */}
-          <button
-            onClick={handleWhereAmINow}
-            disabled={isLocatingWhereAmI}
-            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-950/90 via-[#0d1c38] to-cyan-950/90 hover:from-blue-900/90 hover:to-cyan-900/90 border border-blue-600/60 shadow-lg flex items-center justify-center gap-2.5 text-white font-black text-sm tracking-wide transition-all active:scale-[0.98] disabled:opacity-75 group"
-            title="Оновити поточну GPS-локацію та показати на карті"
-          >
-            {isLocatingWhereAmI ? (
-              <>
-                <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
-                <span className="text-cyan-200">ОТРИМАННЯ GPS КООРДИНАТ...</span>
-              </>
-            ) : (
-              <>
-                <Navigation className="w-4 h-4 text-cyan-400 group-hover:rotate-45 transition-transform" />
-                <span className="drop-shadow-sm">📍 ДЕ Я ЗАРАЗ</span>
-              </>
-            )}
-          </button>
+          {/* ON-DEMAND GPS & MANUAL REFRESH */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleWhereAmINow}
+              disabled={isLocatingWhereAmI}
+              className="w-full py-3.5 px-3 rounded-2xl bg-gradient-to-r from-blue-950/90 via-[#0d1c38] to-cyan-950/90 hover:from-blue-900/90 hover:to-cyan-900/90 border border-blue-600/60 shadow-lg flex items-center justify-center gap-2 text-white font-bold text-xs tracking-wide transition-all active:scale-[0.98] disabled:opacity-75 group"
+              title="Оновити поточну GPS-локацію та показати на карті"
+            >
+              {isLocatingWhereAmI ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+                  <span className="text-cyan-200">GPS...</span>
+                </>
+              ) : (
+                <>
+                  <Navigation className="w-3.5 h-3.5 text-cyan-400 group-hover:rotate-45 transition-transform" />
+                  <span className="drop-shadow-sm">📍 ДЕ Я ЗАРАЗ</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleManualDataRefresh}
+              disabled={isManualRefreshing}
+              className="w-full py-3.5 px-3 rounded-2xl bg-gradient-to-r from-slate-900 via-[#0f172a] to-cyan-950/80 hover:from-slate-800 hover:to-cyan-900/80 border border-cyan-700/60 shadow-lg flex items-center justify-center gap-2 text-white font-bold text-xs tracking-wide transition-all active:scale-[0.98] disabled:opacity-75"
+              title="Примусово оновити всі дані моніторингу та тривог"
+            >
+              {isManualRefreshing ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+                  <span className="text-cyan-200">ОНОВЛЕННЯ...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="drop-shadow-sm">↻ ОНОВИТИ ДАНІ</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* ========================================================================= */}
@@ -1782,6 +1889,39 @@ export default function HomePage() {
                 </span>
               </div>
             </div>
+
+            {/* LAST REFRESH DIAGNOSTICS CARD */}
+            {lastRefreshDiagnostics && (
+              <div className="p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-800/60 space-y-1.5 text-[10px]">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-cyan-300 flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Останній ручний Refresh:</span>
+                  </span>
+                  <span className={'font-mono font-bold px-1.5 py-0.5 rounded ' + (
+                    lastRefreshDiagnostics.status === 'full'
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : lastRefreshDiagnostics.status === 'partial'
+                      ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                      : 'bg-red-950 text-red-300 border border-red-800'
+                  )}>
+                    {lastRefreshDiagnostics.status === 'full' ? 'FULL ✓' : lastRefreshDiagnostics.status === 'partial' ? 'PARTIAL ⚠️' : 'TIMEOUT ⏱️'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-1 text-slate-300">
+                  <div>Тривалість: <span className="font-mono font-bold text-white">{(lastRefreshDiagnostics.durationMs / 1000).toFixed(1)}с</span> <span className="text-slate-500 font-mono">(max 30с)</span></div>
+                  <div>Успішно: <span className="font-mono font-bold text-emerald-400">{lastRefreshDiagnostics.successfulSources}/{lastRefreshDiagnostics.totalSources}</span></div>
+                  <div>Таймаути: <span className="font-mono font-bold text-amber-400">{lastRefreshDiagnostics.timeoutSources}</span></div>
+                  <div>Помилки: <span className="font-mono font-bold text-rose-400">{lastRefreshDiagnostics.failedSources}</span></div>
+                </div>
+                <div className="pt-1 border-t border-cyan-900/60 flex items-center justify-between text-[9px] text-slate-400 font-mono">
+                  <span>Priority: {lastRefreshDiagnostics.stageProgress.userPriority === 'done' ? '✓' : '⚠️'}</span>
+                  <span>Critical: {lastRefreshDiagnostics.stageProgress.critical === 'done' ? '✓' : '⚠️'}</span>
+                  <span>Alerts: {lastRefreshDiagnostics.stageProgress.officialAlerts === 'done' ? '✓' : '⚠️'}</span>
+                  <span>Other: {lastRefreshDiagnostics.stageProgress.otherSources === 'done' ? '✓' : '⚠️'}</span>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={() => setShowRejectedModal(true)}
