@@ -1,0 +1,281 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01000001 /* PersonalSafetyAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000001 /* PersonalSafetyAgentApp.swift */; };
+		01000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000002 /* ContentView.swift */; };
+		01000003 /* WebViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000003 /* WebViewContainer.swift */; };
+		01000004 /* LocationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000004 /* LocationEngine.swift */; };
+		01000005 /* NotificationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000005 /* NotificationEngine.swift */; };
+		01000006 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000006 /* NativeBridge.swift */; };
+		01000007 /* danger_alarm.wav in Resources */ = {isa = PBXBuildFile; fileRef = 02000007 /* danger_alarm.wav */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		00000001 /* PersonalSafetyAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PersonalSafetyAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		02000001 /* PersonalSafetyAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalSafetyAgentApp.swift; sourceTree = "<group>"; };
+		02000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		02000003 /* WebViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewContainer.swift; sourceTree = "<group>"; };
+		02000004 /* LocationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationEngine.swift; sourceTree = "<group>"; };
+		02000005 /* NotificationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationEngine.swift; sourceTree = "<group>"; };
+		02000006 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		02000007 /* danger_alarm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = danger_alarm.wav; sourceTree = "<group>"; };
+		02000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		02000009 /* PersonalSafetyAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PersonalSafetyAgent.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		03000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		04000001 = {
+			isa = PBXGroup;
+			children = (
+				04000002 /* PersonalSafetyAgent */,
+				04000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		04000002 /* PersonalSafetyAgent */ = {
+			isa = PBXGroup;
+			children = (
+				02000001 /* PersonalSafetyAgentApp.swift */,
+				02000002 /* ContentView.swift */,
+				02000003 /* WebViewContainer.swift */,
+				02000004 /* LocationEngine.swift */,
+				02000005 /* NotificationEngine.swift */,
+				02000006 /* NativeBridge.swift */,
+				04000004 /* Resources */,
+				02000008 /* Info.plist */,
+				02000009 /* PersonalSafetyAgent.entitlements */,
+			);
+			path = PersonalSafetyAgent;
+			sourceTree = "<group>";
+		};
+		04000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				00000001 /* PersonalSafetyAgent.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		04000004 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				02000007 /* danger_alarm.wav */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		05000001 /* PersonalSafetyAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 06000001 /* Build configuration list for PBXNativeTarget "PersonalSafetyAgent" */;
+			buildPhases = (
+				07000001 /* Sources */,
+				03000001 /* Frameworks */,
+				08000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PersonalSafetyAgent;
+			productName = PersonalSafetyAgent;
+			productReference = 00000001 /* PersonalSafetyAgent.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		09000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					05000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 06000002 /* Build configuration list for PBXProject "PersonalSafetyAgent" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 04000001;
+			productRefGroup = 04000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				05000001 /* PersonalSafetyAgent */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		08000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				01000007 /* danger_alarm.wav in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		07000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				01000001 /* PersonalSafetyAgentApp.swift in Sources */,
+				01000002 /* ContentView.swift in Sources */,
+				01000003 /* WebViewContainer.swift in Sources */,
+				01000004 /* LocationEngine.swift in Sources */,
+				01000005 /* NotificationEngine.swift in Sources */,
+				01000006 /* NativeBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0A000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0A000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		0A000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PersonalSafetyAgent/PersonalSafetyAgent.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PersonalSafetyAgent/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Safety Agent";
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.personalsafety.agent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Debug;
+		};
+		0A000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PersonalSafetyAgent/PersonalSafetyAgent.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PersonalSafetyAgent/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Safety Agent";
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.personalsafety.agent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		06000001 /* Build configuration list for PBXNativeTarget "PersonalSafetyAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A000003 /* Debug */,
+				0A000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		06000002 /* Build configuration list for PBXProject "PersonalSafetyAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A000001 /* Debug */,
+				0A000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 09000001 /* Project object */;
+}

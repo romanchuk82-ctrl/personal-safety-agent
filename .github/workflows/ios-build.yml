@@ -1,0 +1,40 @@
+name: Build iOS Application
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_15.4.app || true
+
+      - name: Show Xcode Version
+        run: xcodebuild -version
+
+      - name: Build iOS App (Simulator / Generic iOS)
+        run: |
+          xcodebuild \
+            -project ios/PersonalSafetyAgent.xcodeproj \
+            -scheme PersonalSafetyAgent \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+
+      - name: Verify Audio Asset & Entitlements
+        run: |
+          test -f ios/PersonalSafetyAgent/Resources/danger_alarm.wav
+          test -f ios/PersonalSafetyAgent/PersonalSafetyAgent.entitlements
+          test -f ios/PersonalSafetyAgent/Info.plist
+          echo "iOS Assets and Configuration Verified Successfully."
