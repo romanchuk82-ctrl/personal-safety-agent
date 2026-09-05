@@ -89,7 +89,7 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
 
   const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
     ? process.env.NEXT_PUBLIC_BACKEND_URL
-    : '';
+    : 'https://personal-safety-backend.mysterious-structure.workers.dev';
   if (backendBase && (typeof window !== 'undefined' || process.env.NODE_ENV !== 'test')) {
     endpoints.push({
       name: 'worker-proxy',

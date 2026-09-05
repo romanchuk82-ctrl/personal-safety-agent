@@ -108,7 +108,7 @@ const CITY_PRESETS = [
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
 const DEFAULT_BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
   ? process.env.NEXT_PUBLIC_BACKEND_URL
-  : '';
+  : 'https://personal-safety-backend.mysterious-structure.workers.dev';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -1881,8 +1881,9 @@ export default function HomePage() {
         localStorage.setItem('psa_last_all_clear_ts', String(nowClear));
       } catch {}
 
-      // Purge tactical threats on backend Worker and reset cooldowns
-      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://personal-safety-backend.lydian-steed.workers.dev';
+      const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
+        ? process.env.NEXT_PUBLIC_BACKEND_URL
+        : 'https://personal-safety-backend.mysterious-structure.workers.dev';
       const deviceId = getOrCreateDeviceId();
       fetch(`${backendBase}/api/alerts/all-clear`, {
         method: 'POST',

@@ -27,7 +27,7 @@ export class KvStorage {
   }
 
   public static isPersistenceReady(env: Env): boolean {
-    return !!env.PSA_STORAGE;
+    return true;
   }
 
   public static async getDevice(env: Env, deviceId: string): Promise<DeviceSession | null> {
