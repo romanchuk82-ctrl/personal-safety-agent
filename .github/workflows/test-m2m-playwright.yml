@@ -1,0 +1,37 @@
+name: Test M2M Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright
+        run: npx playwright install chromium --with-deps
+
+      - name: Test M2M Endpoint via Headless Chromium
+        run: |
+          node -e "
+            const { chromium } = require('playwright');
+            (async () => {
+              console.log('Launching Chromium...');
+              const browser = await chromium.launch({ headless: true });
+              const page = await browser.newPage();
+              const url = 'https://personal-safety-backend.lydian-steed.workers.dev/api/m2m/monitoring/cycle?token=psa_cron_8f9c1b2e3d4a5e6f7a8b9c0d1e2f3a4b';
+              console.log('Navigating to M2M endpoint...');
+              const res = await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+              console.log('HTTP Status:', res.status());
+              const content = await page.content();
+              console.log('Content preview:', content.slice(0, 300));
+              await browser.close();
+            })();
+          "
