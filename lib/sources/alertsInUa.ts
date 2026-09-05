@@ -79,13 +79,18 @@ function parsePayload(payload: any): { alerts: RawAlert[]; sourceUpdatedIso?: st
   };
 }
 
+export const DEFAULT_ALERTS_TOKEN = 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
+
 async function performFetch(token: string, options: FetchActiveAlertsOptions): Promise<FetchResult> {
+  const effectiveToken = token || DEFAULT_ALERTS_TOKEN;
   const requestedAt = Date.now();
-  const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${token}`;
+  const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${effectiveToken}`;
   const endpoints: { name: string; url: string; headers?: Record<string, string>; isJina?: boolean }[] = [];
 
-  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://personal-safety-backend.lydian-steed.workers.dev';
-  if (typeof window !== 'undefined' || process.env.NODE_ENV !== 'test') {
+  const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
+    ? process.env.NEXT_PUBLIC_BACKEND_URL
+    : '';
+  if (backendBase && (typeof window !== 'undefined' || process.env.NODE_ENV !== 'test')) {
     endpoints.push({
       name: 'worker-proxy',
       url: `${backendBase}/api/alerts/active`,
@@ -99,7 +104,7 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
       url: directUrl,
       headers: {
         Accept: 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${effectiveToken}`
       }
     });
   }
@@ -113,7 +118,6 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
     },
     isJina: true
   });
-  endpoints.push({ name: 'allorigins', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}` });
 
   const endpointTimeoutMs = options.timeoutMs || (options.force ? 3200 : 4500);
   const failures: string[] = [];
@@ -207,7 +211,7 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
 }
 
 export async function fetchActiveAlerts(token?: string, options: FetchActiveAlertsOptions = {}): Promise<FetchResult> {
-  const apiToken = token || process.env.ALERTS_API_TOKEN || '';
+  const apiToken = token || process.env.NEXT_PUBLIC_ALERTS_API_TOKEN || process.env.ALERTS_API_TOKEN || DEFAULT_ALERTS_TOKEN;
   // Overlapping timers share only the active network request. Completed results are
   // never cached, so manual refresh always reaches the official source.
   if (inFlightFetch) {

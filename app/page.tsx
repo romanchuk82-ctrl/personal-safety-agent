@@ -106,7 +106,9 @@ const CITY_PRESETS = [
 ];
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
-const DEFAULT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://personal-safety-backend.lydian-steed.workers.dev';
+const DEFAULT_BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
+  ? process.env.NEXT_PUBLIC_BACKEND_URL
+  : '';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -516,10 +518,14 @@ export default function HomePage() {
     }
 
     const healthUrl = getBackendEndpoint('/healthz');
-    fetch(healthUrl)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setBackendServerOnline(!!d && d.status === 'ok'))
-      .catch(() => setBackendServerOnline(false));
+    if (healthUrl) {
+      fetch(healthUrl)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => setBackendServerOnline(!!d && d.status === 'ok'))
+        .catch(() => setBackendServerOnline(false));
+    } else {
+      setBackendServerOnline(true);
+    }
   }, []);
 
   // Native iOS Bridge listener
@@ -646,19 +652,19 @@ export default function HomePage() {
   };
 
   const getBackendEndpoint = (endpointPath: string): string => {
-    if (typeof window === 'undefined') return `${DEFAULT_BACKEND_URL}${endpointPath}`;
+    if (typeof window === 'undefined') return DEFAULT_BACKEND_URL ? `${DEFAULT_BACKEND_URL}${endpointPath}` : '';
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       return `http://localhost:3001${endpointPath}`;
     }
     const customUrl = localStorage.getItem('psa_backend_url');
     if (customUrl && customUrl.trim().length > 0) {
-      if (customUrl.includes('trycloudflare.com') || customUrl.includes('localhost:3001')) {
+      if (customUrl.includes('trycloudflare.com') || customUrl.includes('localhost:3001') || customUrl.includes('lydian-steed')) {
         localStorage.removeItem('psa_backend_url');
       } else {
         return `${customUrl.replace(/\/$/, '')}${endpointPath}`;
       }
     }
-    return `${DEFAULT_BACKEND_URL}${endpointPath}`;
+    return DEFAULT_BACKEND_URL ? `${DEFAULT_BACKEND_URL}${endpointPath}` : '';
   };
 
   const serializePushSubscription = (sub: PushSubscription) => {
