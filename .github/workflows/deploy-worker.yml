@@ -1,16 +1,10 @@
 name: Deploy Cloudflare Worker Backend
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "worker/**"
-      - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
 
 jobs:
   deploy:
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     runs-on: ubuntu-latest
     name: Deploy to Cloudflare Workers (24/7 $0 Edge)
     steps:
