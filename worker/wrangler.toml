@@ -7,12 +7,14 @@ workers_dev = true
 # Cloudflare Workers Configuration ($0 / Free Tier)
 # Private secrets (VAPID_PRIVATE_KEY, ALERTS_API_TOKEN) are injected via Cloudflare Worker Secrets
 
-# [[kv_namespaces]]
-# binding = "PSA_STORAGE"
-# id = "8d7944ad493e4455b7bd517a5784417f"
+[[kv_namespaces]]
+binding = "PSA_STORAGE"
+id = "9f8a983e7e7f462bb32093ea2a43dc0c"
 
 [vars]
 ENVIRONMENT = "production"
 NEXT_PUBLIC_VAPID_PUBLIC_KEY = "BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk"
+VAPID_PRIVATE_KEY = "5sSdNPfjlAUFMgUMzCH9ynDVifBlX6NehzmtLxpLnOw"
 VAPID_SUBJECT = "mailto:security@personal-safety.app"
+ALERTS_API_TOKEN = "f2184a0fd1d14c5aa291368854cbe654d178883fab2203"
 

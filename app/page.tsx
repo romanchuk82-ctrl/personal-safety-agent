@@ -244,7 +244,7 @@ export default function HomePage() {
   const [isPwaStandalone, setIsPwaStandalone] = useState<boolean>(false);
   const [isIosBrowser, setIsIosBrowser] = useState<boolean>(false);
   const [pushPermissionState, setPushPermissionState] = useState<string>('default');
-  const [lockScreenTestStatus, setLockScreenTestStatus] = useState<'WAITING' | 'VERIFIED' | 'IDLE'>('VERIFIED');
+  const [lockScreenTestStatus, setLockScreenTestStatus] = useState<'WAITING' | 'VERIFIED' | 'IDLE'>('WAITING');
   const [cloudDeliveryStatus, setCloudDeliveryStatus] = useState<'WAITING' | 'VERIFIED'>('WAITING');
   const [lockScreenCountdown, setLockScreenCountdown] = useState<number>(0);
   const [backendServerOnline, setBackendServerOnline] = useState<boolean | null>(null);
@@ -479,9 +479,13 @@ export default function HomePage() {
 
       if (localStorage.getItem('psa_lockscreen_verified') === 'true') {
         setLockScreenTestStatus('VERIFIED');
+      } else {
+        setLockScreenTestStatus('WAITING');
       }
       if (localStorage.getItem('psa_cloud_delivery_verified') === 'true') {
         setCloudDeliveryStatus('VERIFIED');
+      } else {
+        setCloudDeliveryStatus('WAITING');
       }
     }
 
@@ -873,6 +877,33 @@ export default function HomePage() {
     setTimeout(() => setNativeTestAlertNotice(''), 3000);
   };
 
+  const formatPushErrorMessage = (err: any): string => {
+    if (!err) return 'Невідома помилка';
+    const raw = typeof err === 'string' ? err : (err.message || JSON.stringify(err));
+    if (raw.includes('Forbidden') || raw.includes('403')) {
+      return 'Помилка авторизації push-сервісу Apple (код 403)';
+    }
+    if (raw.includes('BadJwtToken') || raw.includes('VapidPkHashMismatch')) {
+      return 'Розбіжність VAPID ключів (оновіть підписку)';
+    }
+    if (raw.includes('BadWebPushToken') || raw.includes('NotRegistered') || raw.includes('410')) {
+      return 'Недійсний токен підписки (перезапустіть сповіщення)';
+    }
+    if (raw.includes('Device session not found') || raw.includes('subscription not found')) {
+      return 'Сесію не знайдено на сервері (натисніть «Увімкнути сповіщення»)';
+    }
+    if (raw.includes('Failed to fetch') || raw.includes('NetworkError')) {
+      return "Помилка мережі (перевірте зв'язок з інтернетом)";
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.reason === 'Forbidden') return 'Помилка авторизації push-сервісу Apple (код 403)';
+      if (parsed.reason) return `Помилка сервісу: ${parsed.reason}`;
+      if (parsed.error) return parsed.error;
+    } catch {}
+    return raw.replace(/\{"reason":"[^"]+"?\}/g, 'Помилка авторизації');
+  };
+
   const handleSendTestThreatPush = async () => {
     if (!isWebPushSubscribed) {
       alert('Спочатку увімкніть сповіщення (натисніть «УВІМКНУТИ СПОВІЩЕННЯ»).');
@@ -892,6 +923,7 @@ export default function HomePage() {
       const testUrl = getBackendEndpoint('/api/alerts/test-push');
 
       setLockScreenTestStatus('WAITING');
+      localStorage.removeItem('psa_lockscreen_verified');
       setLockScreenCountdown(15);
       setNativeTestAlertNotice('Заблокуйте iPhone — Web Push буде надіслано через 15с.');
       const timer = window.setInterval(() => {
@@ -949,7 +981,7 @@ export default function HomePage() {
       setNativeTestAlertNotice(`✓ Push provider прийняв сповіщення (HTTP ${result.provider.statusCode})`);
     } catch (err: any) {
       console.error('[TestPush]', err);
-      setNativeTestAlertNotice(`❌ Помилка: ${err.message || err}`);
+      setNativeTestAlertNotice(`❌ Помилка: ${formatPushErrorMessage(err)}`);
     } finally {
       setTestThreatLoading(false);
     }
@@ -1047,7 +1079,7 @@ export default function HomePage() {
       }
       setNativeTestAlertNotice(`✓ ${titles[type]}: Web Push прийнято провайдером`);
     } catch (error: any) {
-      setNativeTestAlertNotice(`❌ TEST DANGER: ${error?.message || error}`);
+      setNativeTestAlertNotice(`❌ TEST DANGER: ${formatPushErrorMessage(error)}`);
     } finally {
       setTestThreatLoading(false);
     }

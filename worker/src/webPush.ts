@@ -3,15 +3,20 @@ import { WebPushSubscription, Env } from './types.js';
 
 let vapidConfigured = false;
 
+export const DEFAULT_VAPID_PUBLIC_KEY = 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
+export const DEFAULT_VAPID_PRIVATE_KEY = '5sSdNPfjlAUFMgUMzCH9ynDVifBlX6NehzmtLxpLnOw';
+export const DEFAULT_VAPID_SUBJECT = 'mailto:security@personal-safety.app';
+
 export function configureVapid(env: Env): void {
-  const publicKey = env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
-  const privateKey = env.VAPID_PRIVATE_KEY;
-  const subject = env.VAPID_SUBJECT || 'mailto:security@personal-safety.app';
+  const publicKey = (env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '').trim() || DEFAULT_VAPID_PUBLIC_KEY;
+  const privateKey = (env.VAPID_PRIVATE_KEY || '').trim() || DEFAULT_VAPID_PRIVATE_KEY;
+  const subject = (env.VAPID_SUBJECT || '').trim() || DEFAULT_VAPID_SUBJECT;
 
   if (!vapidConfigured && publicKey && privateKey) {
     try {
       webpush.setVapidDetails(subject, publicKey, privateKey);
       vapidConfigured = true;
+      console.log('[CloudWebPush] VAPID configured successfully');
     } catch (err) {
       console.warn('[CloudWebPush] VAPID configuration note:', err);
     }

@@ -6,7 +6,7 @@ const CF_API_TOKEN = process.env.CF_API_TOKEN || '';
 const CRON_SECRET = process.env.CRON_SECRET || 'psa_cron_8f9c1b2e3d4a5e6f7a8b9c0d1e2f3a4b';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '5sSdNPfjlAUFMgUMzCH9ynDVifBlX6NehzmtLxpLnOw';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:security@personal-safety.app';
 
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {

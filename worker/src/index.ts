@@ -324,15 +324,29 @@ export default {
         );
 
         if (!result.success && result.statusCode !== 201 && result.statusCode !== 200) {
-          const isVapidMismatch = typeof result.message === 'string' && result.message.includes('VapidPkHashMismatch');
+          const isVapidMismatch = typeof result.message === 'string' && (result.message.includes('VapidPkHashMismatch') || result.message.includes('BadJwtToken'));
+          const isForbidden = result.statusCode === 403 || (typeof result.message === 'string' && result.message.includes('Forbidden'));
+
+          let friendlyMessage = 'Web Push провайдер відхилив сповіщення';
+          if (isForbidden) {
+            friendlyMessage = 'Помилка авторизації push-сервісу Apple (код 403)';
+          } else if (isVapidMismatch) {
+            friendlyMessage = 'Розбіжність VAPID ключів (потрібна повторна синхронізація)';
+          } else if (result.statusCode === 410) {
+            friendlyMessage = 'Термін дії підписки Web Push закінчився';
+          } else if (result.statusCode === 404) {
+            friendlyMessage = 'Підписку Web Push не знайдено у провайдера';
+          }
+
           return jsonResponse({
             success: false,
-            error: isVapidMismatch ? 'VapidPkHashMismatch' : (result.message || 'Web Push provider rejected the notification'),
-            reason: isVapidMismatch ? 'VapidPkHashMismatch' : undefined,
+            error: friendlyMessage,
+            reason: isVapidMismatch ? 'VapidPkHashMismatch' : (isForbidden ? 'Forbidden' : undefined),
+            statusCode: result.statusCode,
             delivery: {
               webPushSuccess: false,
               webPushProvider: result,
-              error: isVapidMismatch ? 'VapidPkHashMismatch' : result.message
+              error: friendlyMessage
             },
             diagnostics: result
           }, 502);

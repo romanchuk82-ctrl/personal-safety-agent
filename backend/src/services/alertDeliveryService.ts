@@ -2,7 +2,7 @@ import webpush from 'web-push';
 import { DeviceSession, AlertAssessment, AlertDeliveryResult, WebPushSubscription } from '../types.js';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '5sSdNPfjlAUFMgUMzCH9ynDVifBlX6NehzmtLxpLnOw';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:security@personal-safety.app';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
