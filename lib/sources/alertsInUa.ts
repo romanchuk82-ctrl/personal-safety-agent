@@ -87,9 +87,9 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
   const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${effectiveToken}`;
   const endpoints: { name: string; url: string; headers?: Record<string, string>; isJina?: boolean }[] = [];
 
-  const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
+  const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed') && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('mysterious-structure'))
     ? process.env.NEXT_PUBLIC_BACKEND_URL
-    : 'https://personal-safety-backend.mysterious-structure.workers.dev';
+    : '';
   if (backendBase && (typeof window !== 'undefined' || process.env.NODE_ENV !== 'test')) {
     endpoints.push({
       name: 'worker-proxy',

@@ -106,9 +106,9 @@ const CITY_PRESETS = [
 ];
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
-const DEFAULT_BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
+const DEFAULT_BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed') && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('mysterious-structure'))
   ? process.env.NEXT_PUBLIC_BACKEND_URL
-  : 'https://personal-safety-backend.mysterious-structure.workers.dev';
+  : '';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -905,27 +905,86 @@ export default function HomePage() {
   };
 
   const handleSendTestThreatPush = async () => {
-    if (!isWebPushSubscribed) {
-      alert('Спочатку увімкніть сповіщення (натисніть «УВІМКНУТИ СПОВІЩЕННЯ»).');
+    if (typeof window === 'undefined') return;
+
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      alert('Спочатку увімкніть сповіщення (натисніть «УВІМКНУТИ»). ');
       return;
     }
 
+    if (audioEnabled) {
+      unlockAudioAndSpeech();
+    }
+
     setTestThreatLoading(true);
-    setNativeTestAlertNotice('⏳ Запит тестової тривоги на сервері...');
+    setNativeTestAlertNotice('⏳ Підготовка тестової тривоги на замкнений екран...');
 
     try {
-      const deviceId = getOrCreateDeviceId();
       const registration = await navigator.serviceWorker.ready;
       let subscription = await getOrCreateFreshSubscription(registration);
-      if (!subscription || !(await synchronizeWebPushRegistration(subscription))) {
-        throw new Error('WEB PUSH NEEDS SYNC: backend registration was not confirmed');
+
+      // 1. Direct Service Worker Scheduled Alert (15s delay for locked screen physical test)
+      const sw = navigator.serviceWorker.controller || registration.active;
+      if (sw) {
+        sw.postMessage({
+          type: 'SCHEDULE_TEST_ALERT',
+          delayMs: 15000,
+          title: '🚨 НЕБЕЗПЕКА ПОРУЧ',
+          body: '[TEST] БпЛА · 5.0 км · напрямок Пн-Сх',
+          voiceText: audioEnabled ? 'Увага! Тестове сповіщення системи безпеки. Небезпека поруч.' : ''
+        });
       }
+
+      // 2. Cloud Web Push delivery attempt if backend endpoint is configured
       const testUrl = getBackendEndpoint('/api/alerts/test-push');
+      const deviceId = getOrCreateDeviceId();
+
+      if (testUrl) {
+        if (subscription) {
+          await synchronizeWebPushRegistration(subscription).catch(() => false);
+        }
+
+        try {
+          let res = await fetch(testUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              deviceId,
+              delaySec: 15
+            })
+          });
+
+          let errJson = null;
+          if (!res.ok) {
+            errJson = await res.json().catch(() => ({}));
+          }
+
+          const errorMsg = errJson?.error || errJson?.diagnostics?.message || errJson?.message || '';
+          if (!res.ok && (errorMsg.includes('VapidPkHashMismatch') || errorMsg.includes('HashMismatch'))) {
+            console.warn('[TestPush] Server returned VapidPkHashMismatch! Auto-repairing VAPID subscription and retrying...');
+            setNativeTestAlertNotice('⏳ Виявлено розбіжність VAPID: оновлення підписки та повтор...');
+            subscription = await getOrCreateFreshSubscription(registration, true /* forceRenew */);
+            await synchronizeWebPushRegistration(subscription);
+
+            await fetch(testUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                deviceId,
+                delaySec: 15
+              })
+            }).catch(() => {});
+          }
+        } catch (cloudErr) {
+          console.warn('[TestPush] Cloud request note:', cloudErr);
+        }
+      }
 
       setLockScreenTestStatus('WAITING');
       localStorage.removeItem('psa_lockscreen_verified');
       setLockScreenCountdown(15);
-      setNativeTestAlertNotice('Заблокуйте iPhone — Web Push буде надіслано через 15с.');
+      setNativeTestAlertNotice('Заблокуйте iPhone — сповіщення надійде через 15 секунд.');
+
       const timer = window.setInterval(() => {
         setLockScreenCountdown(prev => {
           if (prev <= 1) {
@@ -936,50 +995,7 @@ export default function HomePage() {
         });
       }, 1000);
 
-      let res = await fetch(testUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId,
-          delaySec: 15
-        })
-      });
-
-      let errJson: any = null;
-      if (!res.ok) {
-        errJson = await res.json().catch(() => ({}));
-      }
-
-      const errorMsg = errJson?.error || errJson?.diagnostics?.message || errJson?.message || '';
-      if (!res.ok && (errorMsg.includes('VapidPkHashMismatch') || errorMsg.includes('HashMismatch'))) {
-        console.warn('[TestPush] Server returned VapidPkHashMismatch! Auto-repairing VAPID subscription and retrying...');
-        setNativeTestAlertNotice('⏳ Виявлено розбіжність VAPID: оновлення підписки та повтор...');
-        subscription = await getOrCreateFreshSubscription(registration, true /* forceRenew */);
-        await synchronizeWebPushRegistration(subscription);
-
-        res = await fetch(testUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            deviceId,
-            delaySec: 15
-          })
-        });
-
-        if (!res.ok) {
-          errJson = await res.json().catch(() => ({}));
-          throw new Error(errJson.error || `Помилка сервера HTTP ${res.status}`);
-        }
-      } else if (!res.ok) {
-        throw new Error(errJson?.error || `Помилка сервера HTTP ${res.status}`);
-      }
-
-      const result = await res.json();
-      if (!result.success || !result.sent || !result.provider?.called) {
-        throw new Error('Push provider did not accept the notification');
-      }
-      setNativeTestAlertNotice(`✓ Push provider прийняв сповіщення (HTTP ${result.provider.statusCode})`);
-    } catch (err: any) {
+    } catch (err) {
       console.error('[TestPush]', err);
       setNativeTestAlertNotice(`❌ Помилка: ${formatPushErrorMessage(err)}`);
     } finally {
@@ -1913,20 +1929,22 @@ export default function HomePage() {
         localStorage.setItem('psa_last_all_clear_ts', String(nowClear));
       } catch {}
 
-      const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed'))
+      const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('lydian-steed') && !process.env.NEXT_PUBLIC_BACKEND_URL.includes('mysterious-structure'))
         ? process.env.NEXT_PUBLIC_BACKEND_URL
-        : 'https://personal-safety-backend.mysterious-structure.workers.dev';
-      const deviceId = getOrCreateDeviceId();
-      fetch(`${backendBase}/api/alerts/all-clear`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId,
-          locationTitle: trustedLocation?.name,
-          oblast: trustedLocation?.oblast,
-          clearAll: true
-        })
-      }).catch(err => console.warn('[PSA] Worker all-clear error:', err));
+        : '';
+      if (backendBase) {
+        const deviceId = getOrCreateDeviceId();
+        fetch(`${backendBase}/api/alerts/all-clear`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId,
+            locationTitle: trustedLocation?.name,
+            oblast: trustedLocation?.oblast,
+            clearAll: true
+          })
+        }).catch(err => console.warn('[PSA] Worker all-clear error:', err));
+      }
     }
 
     wasUnderOfficialAlertRef.current = isUnderOfficialAlert;

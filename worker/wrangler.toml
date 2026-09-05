@@ -1,6 +1,7 @@
 name = "personal-safety-backend"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
+account_id = "7532116e9d16abfc6b7eded7a89c4f72"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
@@ -9,7 +10,7 @@ workers_dev = true
 
 [[kv_namespaces]]
 binding = "PSA_STORAGE"
-id = "9f8a983e7e7f462bb32093ea2a43dc0c"
+id = "8d7944ad493e4455b7bd517a5784417f"
 
 [vars]
 ENVIRONMENT = "production"
