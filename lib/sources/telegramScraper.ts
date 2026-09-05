@@ -855,41 +855,70 @@ export const MONITORED_CHANNELS: ChannelConfig[] = [
   }
 ];
 
-export function getPrioritizedChannels(userOblast?: string, customChannels: ChannelConfig[] = []): ChannelConfig[] {
+export function getPrioritizedChannels(
+  userOblast?: string,
+  customChannels: ChannelConfig[] = [],
+  userPriorityUsernames?: string[]
+): ChannelConfig[] {
   // Deduplicate user custom channels and USER_PRIORITY_CHANNELS
   const seenUsernames = new Set<string>();
   const userPriorityMerged: ChannelConfig[] = [];
+  const prioritySet = userPriorityUsernames && userPriorityUsernames.length > 0
+    ? new Set(userPriorityUsernames.map(u => u.trim().toLowerCase().replace(/^@/, '')))
+    : new Set(USER_PRIORITY_CHANNELS.map(u => u.username.toLowerCase()));
 
   // 1. First add any custom channels passed dynamically from storage
   for (const ch of customChannels) {
-    const u = ch.username.toLowerCase();
+    const u = ch.username.toLowerCase().replace(/^@/, '');
     if (!seenUsernames.has(u)) {
       seenUsernames.add(u);
+      const isUserPriority = prioritySet.has(u);
       userPriorityMerged.push({
         ...ch,
-        tier: 'USER_PRIORITY',
+        tier: isUserPriority ? 'USER_PRIORITY' : (ch.tier || 'CUSTOM'),
         category: 'user_custom',
-        priority: 1
+        priority: isUserPriority ? 1 : (ch.priority || 2)
       });
     }
   }
 
   // 2. Add built-in USER_PRIORITY_CHANNELS if not already in list
   for (const ch of USER_PRIORITY_CHANNELS) {
-    const u = ch.username.toLowerCase();
+    const u = ch.username.toLowerCase().replace(/^@/, '');
     if (!seenUsernames.has(u)) {
       seenUsernames.add(u);
-      userPriorityMerged.push(ch);
+      const isUserPriority = prioritySet.has(u);
+      userPriorityMerged.push({
+        ...ch,
+        tier: isUserPriority ? 'USER_PRIORITY' : 'REGIONAL',
+        priority: isUserPriority ? 1 : 2
+      });
     }
   }
 
   // 3. Add system MONITORED_CHANNELS (excluding duplicates of user channels)
-  const systemAvailable = MONITORED_CHANNELS.filter(c => !seenUsernames.has(c.username.toLowerCase()));
+  const systemAvailable = MONITORED_CHANNELS.filter(c => !seenUsernames.has(c.username.toLowerCase().replace(/^@/, ''))).map(c => {
+    const u = c.username.toLowerCase().replace(/^@/, '');
+    if (prioritySet.has(u)) {
+      return {
+        ...c,
+        tier: 'USER_PRIORITY' as SourceTier,
+        priority: 1
+      };
+    }
+    return c;
+  });
 
   const combined = [...userPriorityMerged, ...systemAvailable];
 
   if (!userOblast) {
-    return combined;
+    return combined.sort((a, b) => {
+      if (a.tier === 'USER_PRIORITY' && b.tier !== 'USER_PRIORITY') return -1;
+      if (a.tier !== 'USER_PRIORITY' && b.tier === 'USER_PRIORITY') return 1;
+      if (a.tier === 'CRITICAL' && b.tier !== 'CRITICAL') return -1;
+      if (a.tier !== 'CRITICAL' && b.tier === 'CRITICAL') return 1;
+      return (a.priority || 2) - (b.priority || 2);
+    });
   }
 
   const normUserOblast = userOblast.toLowerCase();
@@ -927,6 +956,88 @@ const telegramCache: Record<string, ChannelCache> = {};
 let rollingBatchIndex = 0;
 let lastKnownSuccessfulCycleTs: number = 0;
 
+export interface ChannelReaderState {
+  preferredReader: string;
+  activeReader: string;
+  fallbackReader?: string;
+  lastSuccessfulReadTs: number;
+  lastMessageId?: string;
+  lastMessageTimeIso?: string;
+  health: 'ONLINE' | 'DEGRADED' | 'FAILED';
+  failoverCount: number;
+}
+
+export const channelReaderStates: Record<string, ChannelReaderState> = {};
+
+export interface TelegramReader {
+  id: string;
+  name: string;
+  buildUrl: (username: string) => string;
+  headers?: (options?: FetchTelegramOptions) => Record<string, string>;
+  isBrowserSupported: boolean;
+}
+
+export const TELEGRAM_READERS: TelegramReader[] = [
+  {
+    id: 'jina_html',
+    name: 'Jina HTML Proxy',
+    buildUrl: (u) => `https://r.jina.ai/https://t.me/s/${u}`,
+    headers: (opts) => ({
+      'x-return-format': 'html',
+      'Accept': 'text/html',
+      ...(opts?.force ? { 'X-No-Cache': 'true', 'X-Cache-Tolerance': '0' } : {})
+    }),
+    isBrowserSupported: true,
+  },
+  {
+    id: 'corsproxy_io',
+    name: 'CorsProxy.io',
+    buildUrl: (u) => `https://corsproxy.io/?url=${encodeURIComponent('https://t.me/s/' + u)}`,
+    headers: () => ({
+      'Accept': 'text/html'
+    }),
+    isBrowserSupported: true,
+  },
+  {
+    id: 'codetabs_proxy',
+    name: 'CodeTabs Proxy',
+    buildUrl: (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent('https://t.me/s/' + u)}`,
+    headers: () => ({
+      'Accept': 'text/html'
+    }),
+    isBrowserSupported: true,
+  },
+  {
+    id: 'allorigins_raw',
+    name: 'AllOrigins Raw',
+    buildUrl: (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent('https://t.me/s/' + u)}`,
+    headers: () => ({
+      'Accept': 'text/html'
+    }),
+    isBrowserSupported: true,
+  },
+  {
+    id: 'widget_embed',
+    name: 'Telegram Widget Embed',
+    buildUrl: (u) => `https://r.jina.ai/https://t.me/${u}?embed=1`,
+    headers: (opts) => ({
+      'x-return-format': 'html',
+      'Accept': 'text/html',
+      ...(opts?.force ? { 'X-No-Cache': 'true', 'X-Cache-Tolerance': '0' } : {})
+    }),
+    isBrowserSupported: true,
+  },
+  {
+    id: 'direct_preview',
+    name: 'Direct Preview',
+    buildUrl: (u) => `https://t.me/s/${u}`,
+    headers: () => ({
+      'Accept': 'text/html'
+    }),
+    isBrowserSupported: false,
+  }
+];
+
 export interface ChannelIngestStatus {
   channel: string;
   title: string;
@@ -936,10 +1047,16 @@ export interface ChannelIngestStatus {
   lastMessageTimeIso?: string;
   lastMessageId?: string;
   lastCheckTimestamp: number;
+  lastSuccessfulReadTs?: number;
+  preferredReader?: string;
+  activeReader?: string;
+  fallbackReader?: string;
+  isFallbackActive?: boolean;
   error?: string;
   tier?: SourceTier;
   hasWebPreview?: boolean;
   statusCategory: 'healthy' | 'unavailable' | 'disabled';
+  health: 'ONLINE' | 'DEGRADED' | 'FAILED';
 }
 
 export interface TelegramIngestMetrics {
@@ -951,6 +1068,8 @@ export interface TelegramIngestMetrics {
   disabledCount: number;
   userPriorityTotal: number;
   userPriorityHealthy: number;
+  userPriorityFallbackCount: number;
+  userPriorityFailedCount: number;
   userPriorityUnavailable: number;
   criticalTotal: number;
   criticalHealthy: number;
@@ -977,6 +1096,52 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ');
+}
+
+export function parseTelegramHtml(html: string, channel: ChannelConfig): TelegramMessage[] {
+  if (!html || typeof html !== 'string') return [];
+  const messages: TelegramMessage[] = [];
+  const now = Date.now();
+
+  // Split by message container: either tgme_widget_message_wrap (web preview) or tgme_widget_message (widget embed)
+  const blocks = html.split(/(?:<div class="tgme_widget_message_wrap|<div class="tgme_widget_message\b(?!\s*_\w)[^>]*data-post)/i);
+
+  for (let i = 1; i < blocks.length; i++) {
+    const block = blocks[i];
+    const textMatch = block.match(/<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/i);
+    const timeMatch = block.match(/<time[^>]*\bdatetime="([^"]+)"/i);
+
+    if (textMatch) {
+      const rawText = textMatch[1]
+        .replace(/<tg-emoji[^>]*>([\s\S]*?)<\/tg-emoji>/gi, '$1')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .trim();
+
+      const decodedText = decodeHtmlEntities(rawText);
+      const timeIso = timeMatch ? timeMatch[1] : new Date().toISOString();
+      const unixTimestamp = new Date(timeIso).getTime();
+
+      if (
+        decodedText.length > 3 &&
+        !decodedText.includes('document.body') &&
+        !decodedText.includes('no_transition') &&
+        !decodedText.startsWith('<script')
+      ) {
+        const id = channel.username + '_' + (isNaN(unixTimestamp) ? now : unixTimestamp) + '_' + decodedText.slice(0, 15).replace(/\s+/g, '_');
+        messages.push({
+          id,
+          channel: channel.username,
+          channelTitle: channel.title,
+          authorityWeight: channel.weight,
+          text: decodedText,
+          timeIso,
+          unixTimestamp: isNaN(unixTimestamp) ? now : unixTimestamp
+        });
+      }
+    }
+  }
+  return messages;
 }
 
 export interface RefreshDiagnostics {
@@ -1007,6 +1172,9 @@ export interface FetchChannelResult {
   messages: TelegramMessage[];
   error?: string;
   statusCategory: 'healthy' | 'timeout' | 'unavailable';
+  health: 'ONLINE' | 'DEGRADED' | 'FAILED';
+  readerUsed?: string;
+  isFallback?: boolean;
   durationMs: number;
 }
 
@@ -1015,15 +1183,31 @@ export async function fetchChannelMessages(
   options?: FetchTelegramOptions
 ): Promise<FetchChannelResult> {
   const now = Date.now();
-  const cached = telegramCache[channel.username];
+  const cleanUser = channel.username.trim().toLowerCase().replace(/^@/, '');
+  const cached = telegramCache[cleanUser];
   const startTime = Date.now();
 
-  // Rate-limit safety: 15s normal cycle, 6s forced refresh threshold to prevent proxy rate-limiting
-  const minInterval = options?.force ? 6000 : 15000;
-  if (cached && (now - cached.timestamp) < minInterval) {
+  let state = channelReaderStates[cleanUser];
+  if (!state) {
+    state = {
+      preferredReader: 'jina_html',
+      activeReader: 'jina_html',
+      lastSuccessfulReadTs: 0,
+      health: 'ONLINE',
+      failoverCount: 0
+    };
+    channelReaderStates[cleanUser] = state;
+  }
+
+  // Rate-limit safety: 15s normal cycle, 0s forced refresh threshold
+  const minInterval = options?.force ? 0 : 15000;
+  if (!options?.force && cached && (now - cached.timestamp) < minInterval) {
     return {
       messages: cached.messages,
       statusCategory: 'healthy',
+      health: state.health || 'ONLINE',
+      readerUsed: state.activeReader,
+      isFallback: !!state.fallbackReader,
       durationMs: 0
     };
   }
@@ -1033,53 +1217,45 @@ export async function fetchChannelMessages(
       messages: cached?.messages || [],
       error: 'Запит скасовано за таймаутом',
       statusCategory: 'timeout',
+      health: (cached && cached.messages.length > 0) ? 'DEGRADED' : 'FAILED',
+      readerUsed: state.activeReader,
       durationMs: 0
     };
   }
 
-  const cleanUser = channel.username.trim().replace(/^@/, '');
   const isBrowser = typeof window !== 'undefined';
-  const targetUrl = 'https://t.me/s/' + cleanUser;
-  const fetchEndpoints: { url: string; headers?: Record<string, string> }[] = [];
+  const availableReaders = TELEGRAM_READERS.filter(r => !isBrowser || r.isBrowserSupported);
 
-  if (!isBrowser) {
-    fetchEndpoints.push({ url: targetUrl, headers: { 'Accept': 'text/html' } });
-  }
-  // Jina proxy with x-return-format: html provides high-speed, CORS-compliant HTML access
-  fetchEndpoints.push({
-    url: 'https://r.jina.ai/' + targetUrl,
-    headers: {
-      'x-return-format': 'html',
-      'Accept': 'text/html',
-      ...(options?.force ? { 'X-No-Cache': 'true', 'X-Cache-Tolerance': '0' } : {})
-    }
-  });
-  fetchEndpoints.push({
-    url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl)
-  });
+  // Preferred reader first, then remaining readers in priority sequence
+  const preferred = availableReaders.find(r => r.id === state.preferredReader) || availableReaders[0];
+  const readersToTry = [
+    preferred,
+    ...availableReaders.filter(r => r.id !== preferred.id)
+  ];
 
-  const endpointTimeoutMs = options?.timeoutMs || (options?.force ? 3000 : 4500);
+  const perReaderTimeoutMs = options?.timeoutMs || (options?.force ? 2800 : 3800);
+  let lastError = 'Тимчасово не відповідає';
   let isTimeout = false;
 
-  for (const ep of fetchEndpoints) {
+  for (const reader of readersToTry) {
     if (options?.signal?.aborted) {
       isTimeout = true;
       break;
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), endpointTimeoutMs);
-
+    const timer = setTimeout(() => controller.abort(), perReaderTimeoutMs);
     const abortHandler = () => controller.abort();
     if (options?.signal) {
       options.signal.addEventListener('abort', abortHandler, { once: true });
     }
 
     try {
-      const res = await fetch(ep.url, {
-        headers: ep.headers || {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
+      const url = reader.buildUrl(cleanUser);
+      const headers = reader.headers ? reader.headers(options) : { 'Accept': 'text/html' };
+
+      const res = await fetch(url, {
+        headers,
         signal: controller.signal,
         cache: options?.force ? 'no-store' : 'default'
       });
@@ -1091,64 +1267,45 @@ export async function fetchChannelMessages(
 
       if (res.ok) {
         const html = await res.text();
-        const messages: TelegramMessage[] = [];
-
-        // Split by Telegram message wrapper blocks for rock-solid parsing
-        const blocks = html.split(/<div class="tgme_widget_message_wrap/i);
-
-        for (let i = 1; i < blocks.length; i++) {
-          const block = blocks[i];
-          const textMatch = block.match(/<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/i);
-          const timeMatch = block.match(/<time datetime="([^"]+)"/i);
-
-          if (textMatch) {
-            const rawText = textMatch[1]
-              .replace(/<tg-emoji[^>]*>([\s\S]*?)<\/tg-emoji>/gi, '$1')
-              .replace(/<br\s*\/?>/gi, '\n')
-              .replace(/<[^>]+>/g, '')
-              .trim();
-
-            const decodedText = decodeHtmlEntities(rawText);
-            const timeIso = timeMatch ? timeMatch[1] : new Date().toISOString();
-            const unixTimestamp = new Date(timeIso).getTime();
-
-            if (
-              decodedText.length > 3 &&
-              !decodedText.includes('document.body') &&
-              !decodedText.includes('no_transition') &&
-              !decodedText.startsWith('<script')
-            ) {
-              const id = channel.username + '_' + (isNaN(unixTimestamp) ? now : unixTimestamp) + '_' + decodedText.slice(0, 15).replace(/\s+/g, '_');
-              messages.push({
-                id,
-                channel: channel.username,
-                channelTitle: channel.title,
-                authorityWeight: channel.weight,
-                text: decodedText,
-                timeIso,
-                unixTimestamp: isNaN(unixTimestamp) ? now : unixTimestamp
-              });
-            }
-          }
-        }
+        const messages = parseTelegramHtml(html, channel);
 
         if (messages.length > 0) {
           const recent = messages.slice(-20);
-          telegramCache[channel.username] = {
+          telegramCache[cleanUser] = {
             messages: recent,
             timestamp: now,
             lastSuccessIso: new Date(now).toISOString()
           };
+
+          const isFallback = reader.id !== state.preferredReader;
+          state.activeReader = reader.id;
+          state.fallbackReader = isFallback ? reader.id : undefined;
+          if (isFallback) {
+            state.failoverCount++;
+          }
+          state.lastSuccessfulReadTs = now;
+          state.lastMessageId = recent[recent.length - 1]?.id;
+          state.lastMessageTimeIso = recent[recent.length - 1]?.timeIso;
+          state.health = 'ONLINE';
+
           return {
             messages: recent,
             statusCategory: 'healthy',
+            health: 'ONLINE',
+            readerUsed: reader.name,
+            isFallback,
             durationMs: Date.now() - startTime
           };
         }
+      } else {
+        lastError = `HTTP ${res.status} (${reader.name})`;
       }
     } catch (err: any) {
       if (err?.name === 'AbortError' || options?.signal?.aborted) {
         isTimeout = true;
+        lastError = `Таймаут (${reader.name})`;
+      } else {
+        lastError = err?.message || `Помилка (${reader.name})`;
       }
     } finally {
       clearTimeout(timer);
@@ -1160,18 +1317,25 @@ export async function fetchChannelMessages(
 
   const durationMs = Date.now() - startTime;
   if (cached && cached.messages.length > 0) {
+    state.health = 'DEGRADED';
     return {
       messages: cached.messages,
-      error: isTimeout ? 'Таймаут (використано кеш)' : 'Кеш (останнє оновлення)',
+      error: isTimeout ? 'Таймаут (використано кеш)' : `Кеш (${lastError})`,
       statusCategory: isTimeout ? 'timeout' : 'healthy',
+      health: 'DEGRADED',
+      readerUsed: state.activeReader,
+      isFallback: !!state.fallbackReader,
       durationMs
     };
   }
 
+  state.health = 'FAILED';
   return {
     messages: [],
-    error: isTimeout ? 'Таймаут з’єднання' : 'Тимчасово не відповідає',
+    error: isTimeout ? 'Таймаут усіх рідерів' : `Усі рідери недоступні: ${lastError}`,
     statusCategory: isTimeout ? 'timeout' : 'unavailable',
+    health: 'FAILED',
+    readerUsed: state.activeReader,
     durationMs
   };
 }
@@ -1180,7 +1344,8 @@ export async function fetchAllTelegramFeeds(
   userOblast?: string,
   _ignoredMaxParallel?: number,
   customChannels: ChannelConfig[] = [],
-  options?: FetchTelegramOptions
+  options?: FetchTelegramOptions,
+  userPriorityUsernames?: string[]
 ): Promise<{
   messages: TelegramMessage[];
   sourceStatus: Record<string, ChannelIngestStatus>;
@@ -1190,26 +1355,18 @@ export async function fetchAllTelegramFeeds(
   const sourceStatus: Record<string, ChannelIngestStatus> = {};
   const now = Date.now();
 
-  const allAvailable = getPrioritizedChannels(userOblast, customChannels);
-  
-  // All channels in the cleaned catalog are verified to have web preview
+  const allAvailable = getPrioritizedChannels(userOblast, customChannels, userPriorityUsernames);
   const activeChannels = allAvailable.filter(c => c.enabled !== false);
 
-  // STRICT TIERED EXECUTION:
-  // 1. USER PRIORITY CHANNELS (Tier 1 - Highest priority)
   const userPriorityChannels = activeChannels.filter(c => c.tier === 'USER_PRIORITY');
-
-  // 2. CRITICAL CHANNELS (Tier 2 - National radar and strategic command)
   const criticalChannels = activeChannels.filter(c => c.tier === 'CRITICAL');
 
-  // Set of all mandatory "Every Cycle" channels
   const mandatoryUsernames = new Set([
-    ...userPriorityChannels.map(c => c.username.toLowerCase()),
-    ...criticalChannels.map(c => c.username.toLowerCase())
+    ...userPriorityChannels.map(c => c.username.toLowerCase().replace(/^@/, '')),
+    ...criticalChannels.map(c => c.username.toLowerCase().replace(/^@/, ''))
   ]);
 
-  // 3. REGIONAL / OTHER CHANNELS (Tier 3 - Polled in rotating batches)
-  const regionalChannels = activeChannels.filter(c => !mandatoryUsernames.has(c.username.toLowerCase()));
+  const regionalChannels = activeChannels.filter(c => !mandatoryUsernames.has(c.username.toLowerCase().replace(/^@/, '')));
   const BATCH_SIZE = 15;
   const startIndex = (rollingBatchIndex * BATCH_SIZE) % Math.max(1, regionalChannels.length);
   const selectedBatch = regionalChannels.slice(startIndex, startIndex + BATCH_SIZE);
@@ -1219,19 +1376,19 @@ export async function fetchAllTelegramFeeds(
   let timeoutSourcesCount = 0;
   let failedSourcesCount = 0;
 
-  // Helper to fetch a channel list in parallel chunks of CONCURRENCY
   const fetchChannelTier = async (channels: ChannelConfig[]) => {
     for (let i = 0; i < channels.length; i += CONCURRENCY) {
       if (options?.signal?.aborted) {
-        // Mark remaining in tier as timeout/skipped immediately
         for (let j = i; j < channels.length; j++) {
           const ch = channels[j];
-          if (!sourceStatus[ch.username]) {
-            const cached = telegramCache[ch.username];
+          const cleanU = ch.username.toLowerCase().replace(/^@/, '');
+          if (!sourceStatus[cleanU]) {
+            const cached = telegramCache[cleanU];
             if (cached && cached.messages.length > 0) {
               cached.messages.forEach(m => allMessagesMap.set(m.id, m));
             }
-            sourceStatus[ch.username] = {
+            const rState = channelReaderStates[cleanU];
+            sourceStatus[cleanU] = {
               channel: ch.username,
               title: ch.title,
               ok: (cached?.messages.length ?? 0) > 0,
@@ -1240,10 +1397,16 @@ export async function fetchAllTelegramFeeds(
               lastMessageTimeIso: cached?.messages[cached.messages.length - 1]?.timeIso,
               lastMessageId: cached?.messages[cached.messages.length - 1]?.id,
               lastCheckTimestamp: cached?.timestamp || now,
+              lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached?.timestamp || 0,
+              preferredReader: rState?.preferredReader || 'jina_html',
+              activeReader: rState?.activeReader || 'jina_html',
+              fallbackReader: rState?.fallbackReader,
+              isFallbackActive: !!rState?.fallbackReader,
               error: 'Таймаут (ліміт часу перевищено)',
               tier: ch.tier,
               hasWebPreview: true,
-              statusCategory: 'unavailable'
+              statusCategory: 'unavailable',
+              health: (cached && cached.messages.length > 0) ? 'DEGRADED' : 'FAILED'
             };
             timeoutSourcesCount++;
           }
@@ -1256,16 +1419,18 @@ export async function fetchAllTelegramFeeds(
 
       chunkResults.forEach((res, idx) => {
         const ch = chunk[idx];
+        const cleanU = ch.username.toLowerCase().replace(/^@/, '');
+        const rState = channelReaderStates[cleanU];
         if (res.status === 'fulfilled') {
-          const { messages, error, statusCategory } = res.value;
+          const { messages, error, statusCategory, health, readerUsed, isFallback } = res.value;
           messages.forEach(m => allMessagesMap.set(m.id, m));
           const latestMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
-          const isOk = messages.length > 0 && statusCategory === 'healthy';
+          const isOk = messages.length > 0 && (statusCategory === 'healthy' || health === 'ONLINE');
 
           if (statusCategory === 'timeout') timeoutSourcesCount++;
           else if (!isOk) failedSourcesCount++;
 
-          sourceStatus[ch.username] = {
+          sourceStatus[cleanU] = {
             channel: ch.username,
             title: ch.title,
             ok: isOk,
@@ -1274,29 +1439,41 @@ export async function fetchAllTelegramFeeds(
             lastMessageTimeIso: latestMsg?.timeIso,
             lastMessageId: latestMsg?.id,
             lastCheckTimestamp: now,
+            lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || (isOk ? now : 0),
+            preferredReader: rState?.preferredReader || 'jina_html',
+            activeReader: readerUsed || rState?.activeReader || 'jina_html',
+            fallbackReader: rState?.fallbackReader,
+            isFallbackActive: isFallback ?? !!rState?.fallbackReader,
             error: isOk ? undefined : (error || 'Немає свіжих повідомлень'),
             tier: ch.tier,
             hasWebPreview: true,
-            statusCategory: isOk ? 'healthy' : (statusCategory === 'timeout' ? 'unavailable' : 'unavailable')
+            statusCategory: isOk ? 'healthy' : (statusCategory === 'timeout' ? 'unavailable' : 'unavailable'),
+            health: health || (isOk ? 'ONLINE' : 'FAILED')
           };
         } else {
           failedSourcesCount++;
-          sourceStatus[ch.username] = {
+          sourceStatus[cleanU] = {
             channel: ch.username,
             title: ch.title,
             ok: false,
             count: 0,
             lastCheckTimestamp: now,
+            lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || 0,
+            preferredReader: rState?.preferredReader || 'jina_html',
+            activeReader: rState?.activeReader || 'jina_html',
+            fallbackReader: rState?.fallbackReader,
+            isFallbackActive: !!rState?.fallbackReader,
             error: res.reason?.message || 'Помилка з’єднання',
             tier: ch.tier,
             hasWebPreview: true,
-            statusCategory: 'unavailable'
+            statusCategory: 'unavailable',
+            health: 'FAILED'
           };
         }
       });
 
       if (i + CONCURRENCY < channels.length && !options?.signal?.aborted) {
-        await new Promise(r => setTimeout(r, 40));
+        await new Promise(r => setTimeout(r, 30));
       }
     }
   };
@@ -1316,12 +1493,14 @@ export async function fetchAllTelegramFeeds(
 
   // Populate remaining regional channels from cache
   regionalChannels.forEach(ch => {
-    if (!sourceStatus[ch.username]) {
-      const cached = telegramCache[ch.username];
+    const cleanU = ch.username.toLowerCase().replace(/^@/, '');
+    if (!sourceStatus[cleanU]) {
+      const cached = telegramCache[cleanU];
+      const rState = channelReaderStates[cleanU];
       if (cached && cached.messages.length > 0) {
         cached.messages.forEach(m => allMessagesMap.set(m.id, m));
         const latestMsg = cached.messages[cached.messages.length - 1];
-        sourceStatus[ch.username] = {
+        sourceStatus[cleanU] = {
           channel: ch.username,
           title: ch.title,
           ok: true,
@@ -1330,21 +1509,31 @@ export async function fetchAllTelegramFeeds(
           lastMessageTimeIso: latestMsg?.timeIso,
           lastMessageId: latestMsg?.id,
           lastCheckTimestamp: cached.timestamp,
+          lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached.timestamp,
+          preferredReader: rState?.preferredReader || 'jina_html',
+          activeReader: rState?.activeReader || 'jina_html',
+          fallbackReader: rState?.fallbackReader,
+          isFallbackActive: !!rState?.fallbackReader,
           tier: ch.tier,
           hasWebPreview: true,
-          statusCategory: 'healthy'
+          statusCategory: 'healthy',
+          health: 'DEGRADED'
         };
       } else {
-        sourceStatus[ch.username] = {
+        sourceStatus[cleanU] = {
           channel: ch.username,
           title: ch.title,
           ok: false,
           count: 0,
           lastCheckTimestamp: now,
+          lastSuccessfulReadTs: 0,
+          preferredReader: rState?.preferredReader || 'jina_html',
+          activeReader: rState?.activeReader || 'jina_html',
           error: 'Очікує черги опитування',
           tier: ch.tier,
           hasWebPreview: true,
-          statusCategory: 'unavailable'
+          statusCategory: 'unavailable',
+          health: 'FAILED'
         };
       }
     }
@@ -1353,20 +1542,24 @@ export async function fetchAllTelegramFeeds(
   const allMessages = Array.from(allMessagesMap.values());
   allMessages.sort((a, b) => b.unixTimestamp - a.unixTimestamp);
 
-  // Calculate Metrics
   const healthyCount = Object.values(sourceStatus).filter(s => s.statusCategory === 'healthy').length;
   const unavailableCount = Object.values(sourceStatus).filter(s => s.statusCategory === 'unavailable').length;
 
   const userPriorityTotal = userPriorityChannels.length;
-  const userPriorityHealthy = userPriorityChannels.filter(c => sourceStatus[c.username]?.ok).length;
-  const userPriorityUnavailable = userPriorityTotal - userPriorityHealthy;
+  const userPriorityHealthy = userPriorityChannels.filter(c => sourceStatus[c.username.toLowerCase().replace(/^@/, '')]?.ok).length;
+  const userPriorityFallbackCount = userPriorityChannels.filter(c => {
+    const s = sourceStatus[c.username.toLowerCase().replace(/^@/, '')];
+    return s && s.ok && s.isFallbackActive;
+  }).length;
+  const userPriorityFailedCount = userPriorityTotal - userPriorityHealthy;
+  const userPriorityUnavailable = userPriorityFailedCount;
 
   const criticalTotal = criticalChannels.length;
-  const criticalHealthy = criticalChannels.filter(c => sourceStatus[c.username]?.ok).length;
+  const criticalHealthy = criticalChannels.filter(c => sourceStatus[c.username.toLowerCase().replace(/^@/, '')]?.ok).length;
   const criticalError = criticalTotal - criticalHealthy;
 
   const regionalTotal = regionalChannels.length;
-  const regionalHealthy = regionalChannels.filter(c => sourceStatus[c.username]?.ok).length;
+  const regionalHealthy = regionalChannels.filter(c => sourceStatus[c.username.toLowerCase().replace(/^@/, '')]?.ok).length;
   const regionalUnavailable = regionalTotal - regionalHealthy;
 
   if (healthyCount > 0) {
@@ -1389,6 +1582,8 @@ export async function fetchAllTelegramFeeds(
     disabledCount: 0,
     userPriorityTotal,
     userPriorityHealthy,
+    userPriorityFallbackCount,
+    userPriorityFailedCount,
     userPriorityUnavailable,
     criticalTotal,
     criticalHealthy,
@@ -1560,5 +1755,8 @@ export function __resetTelegramScraperStateForTests(): void {
   rollingBatchIndex = 0;
   for (const key of Object.keys(telegramCache)) {
     delete telegramCache[key];
+  }
+  for (const key of Object.keys(channelReaderStates)) {
+    delete channelReaderStates[key];
   }
 }

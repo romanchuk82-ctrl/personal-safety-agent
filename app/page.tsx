@@ -50,7 +50,8 @@ import {
   Map as MapIcon,
   Edit3,
   AlertCircle,
-  Loader2
+  Loader2,
+  Star
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic, getActiveAirRaidAlerts } from '@/lib/sources/alertsInUa';
 import {
@@ -180,6 +181,8 @@ export default function HomePage() {
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [showFlugerModal, setShowFlugerModal] = useState<boolean>(false);
   const [customChannels, setCustomChannels] = useState<ChannelConfig[]>(USER_PRIORITY_CHANNELS);
+  const [userPriorityUsernames, setUserPriorityUsernames] = useState<string[]>(USER_PRIORITY_CHANNELS.map(c => c.username));
+  const userPriorityUsernamesRef = useRef<string[]>(USER_PRIORITY_CHANNELS.map(c => c.username));
   const [newChannelInput, setNewChannelInput] = useState<string>('');
   const [channelAddMessage, setChannelAddMessage] = useState<string>('');
   const [selectedThreat, setSelectedThreat] = useState<ThreatEvent | null>(null);
@@ -221,6 +224,22 @@ export default function HomePage() {
         setRadiusKm(parsed);
       }
     }
+
+    try {
+      const storedPriority = localStorage.getItem('psa_user_priority_usernames');
+      if (storedPriority) {
+        const parsed = JSON.parse(storedPriority) as string[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setUserPriorityUsernames(parsed);
+          userPriorityUsernamesRef.current = parsed;
+        }
+      } else {
+        const defaults = USER_PRIORITY_CHANNELS.map(c => c.username);
+        setUserPriorityUsernames(defaults);
+        userPriorityUsernamesRef.current = defaults;
+        localStorage.setItem('psa_user_priority_usernames', JSON.stringify(defaults));
+      }
+    } catch (e) {}
 
     try {
       const storedChannels = localStorage.getItem('psa_custom_channels');
@@ -384,11 +403,17 @@ export default function HomePage() {
           signal: options?.signal,
           timeoutMs: options?.force ? 3200 : 4500
         }),
-        fetchAllTelegramFeeds(currentLoc.oblast, undefined, customChannels, {
-          force: options?.force,
-          signal: options?.signal,
-          timeoutMs: options?.force ? 3000 : 4500
-        })
+        fetchAllTelegramFeeds(
+          currentLoc.oblast,
+          undefined,
+          customChannels,
+          {
+            force: options?.force,
+            signal: options?.signal,
+            timeoutMs: options?.force ? 3000 : 4500
+          },
+          userPriorityUsernamesRef.current
+        )
       ]);
 
       // Guard against out-of-order responses overwriting newer state
@@ -952,26 +977,86 @@ export default function HomePage() {
   };
 
   const handleRemoveCustomChannel = (username: string) => {
-    if (USER_PRIORITY_CHANNELS.some(c => c.username.toLowerCase() === username.toLowerCase())) {
-      setChannelAddMessage('⚠️ Канали "Мої пріоритетні" захищені від випадкового видалення.');
-      setTimeout(() => setChannelAddMessage(''), 3500);
-      return;
-    }
-    const updated = customChannels.filter((c) => c.username.toLowerCase() !== username.toLowerCase());
+    const clean = username.trim().toLowerCase().replace(/^@/, '');
+    const updated = customChannels.filter(c => c.username.toLowerCase().replace(/^@/, '') !== clean);
     setCustomChannels(updated);
-    localStorage.setItem('psa_custom_channels', JSON.stringify(updated));
+    try {
+      localStorage.setItem('psa_custom_channels', JSON.stringify(updated));
+    } catch (e) {}
+    setChannelAddMessage('Канал @' + clean + ' видалено.');
+    setTimeout(() => setChannelAddMessage(''), 3000);
   };
+
+  const handleToggleUserPriority = useCallback((rawUsername: string) => {
+    const clean = rawUsername.trim().replace(/^@/, '');
+    const current = userPriorityUsernamesRef.current;
+    const currentClean = current.map(u => u.toLowerCase().replace(/^@/, ''));
+    let updated: string[];
+
+    if (currentClean.includes(clean.toLowerCase())) {
+      updated = current.filter(u => u.toLowerCase().replace(/^@/, '') !== clean.toLowerCase());
+      setLocationSuccessNotice(`☆ Канал @${clean} знято з USER PRIORITY`);
+    } else {
+      updated = [...current, clean];
+      setLocationSuccessNotice(`★ Канал @${clean} додано до USER PRIORITY!`);
+    }
+
+    userPriorityUsernamesRef.current = updated;
+    setUserPriorityUsernames(updated);
+    try {
+      localStorage.setItem('psa_user_priority_usernames', JSON.stringify(updated));
+    } catch (e) {}
+    setTimeout(() => setLocationSuccessNotice(''), 3000);
+
+    const loc = trustedLocation || locationValidatorRef.current.getTrustedLocation();
+    if (loc) {
+      performSecurityCheck(loc, { force: true });
+    }
+  }, [trustedLocation, performSecurityCheck]);
+
+  const priorityUsernamesSet = new Set(
+    userPriorityUsernames.map(u => u.toLowerCase().replace(/^@/, ''))
+  );
 
   const allSourcesMap = new Map<string, ChannelConfig>();
   for (const c of customChannels) {
-    allSourcesMap.set(c.username.toLowerCase(), c);
+    const u = c.username.toLowerCase().replace(/^@/, '');
+    allSourcesMap.set(u, {
+      ...c,
+      tier: priorityUsernamesSet.has(u) ? 'USER_PRIORITY' : (c.tier || 'CUSTOM')
+    });
   }
   for (const c of MONITORED_CHANNELS) {
-    if (!allSourcesMap.has(c.username.toLowerCase())) {
-      allSourcesMap.set(c.username.toLowerCase(), c);
+    const u = c.username.toLowerCase().replace(/^@/, '');
+    if (!allSourcesMap.has(u)) {
+      allSourcesMap.set(u, {
+        ...c,
+        tier: priorityUsernamesSet.has(u) ? 'USER_PRIORITY' : c.tier
+      });
+    }
+  }
+  for (const ch of USER_PRIORITY_CHANNELS) {
+    const u = ch.username.toLowerCase().replace(/^@/, '');
+    if (!allSourcesMap.has(u)) {
+      allSourcesMap.set(u, {
+        ...ch,
+        tier: priorityUsernamesSet.has(u) ? 'USER_PRIORITY' : 'REGIONAL'
+      });
     }
   }
   const allSources = Array.from(allSourcesMap.values());
+  const userPriorityChannelList = allSources.filter(s => 
+    priorityUsernamesSet.has(s.username.toLowerCase().replace(/^@/, ''))
+  );
+
+  const userPriorityTotalCount = sourcesHealth?.userPriorityTotal ?? userPriorityChannelList.length;
+  const userPriorityHealthyCount = sourcesHealth?.userPriorityHealthy ?? userPriorityChannelList.filter(c => sourceStatuses[c.username.toLowerCase().replace(/^@/, '')]?.ok).length;
+  const userPriorityFallbackCount = sourcesHealth?.userPriorityFallbackCount ?? userPriorityChannelList.filter(c => {
+    const st = sourceStatuses[c.username.toLowerCase().replace(/^@/, '')];
+    return st && st.ok && st.isFallbackActive;
+  }).length;
+  const userPriorityFailedCount = sourcesHealth?.userPriorityFailedCount ?? Math.max(0, userPriorityTotalCount - userPriorityHealthyCount);
+
   const monitoredSourcesCount = evaluation?.monitoringStats?.monitored ?? allSources.filter(c => c.hasWebPreview !== false && c.enabled !== false).length;
   const state = evaluation?.overallState || (isActive ? 'GREEN' : 'GREEN');
   const isRed = state === 'RED';
@@ -1919,6 +2004,90 @@ export default function HomePage() {
               </p>
             </div>
 
+            {/* 1.5 USER PRIORITY CHANNELS & MULTI-READER BLOCK */}
+            <div className="p-3 rounded-xl bg-[#070a10] border border-amber-500/40 space-y-2.5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                  <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                  <span>USER PRIORITY ДЖЕРЕЛА</span>
+                </span>
+                <span className="text-[10px] font-mono text-amber-300 font-bold px-2 py-0.5 rounded bg-amber-950/80 border border-amber-800/80">
+                  {userPriorityHealthyCount}/{userPriorityTotalCount} ЧИТАЮТЬСЯ
+                </span>
+              </div>
+
+              {/* 4 KEY METRICS */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center text-[10px]">
+                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block font-mono text-[9px]">USER PRIORITY</span>
+                  <span className="font-bold text-amber-300 text-xs mt-0.5 block">{userPriorityTotalCount}</span>
+                </div>
+                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block font-mono text-[9px]">РЕАЛЬНО ЧИТАЮТЬСЯ</span>
+                  <span className="font-bold text-emerald-400 text-xs mt-0.5 block">{userPriorityHealthyCount}</span>
+                </div>
+                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block font-mono text-[9px]">FALLBACK READER</span>
+                  <span className="font-bold text-cyan-300 text-xs mt-0.5 block">{userPriorityFallbackCount}</span>
+                </div>
+                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block font-mono text-[9px]">НЕ ВДАЛОСЯ ПРОЧИТАТИ</span>
+                  <span className={'font-bold text-xs mt-0.5 block ' + (userPriorityFailedCount > 0 ? 'text-rose-400' : 'text-slate-400')}>
+                    {userPriorityFailedCount}
+                  </span>
+                </div>
+              </div>
+
+              {/* USER PRIORITY CHANNELS LIST WITH ACTIVE READER AND LAST READ TIME */}
+              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 text-[10px]">
+                {userPriorityChannelList.map((ch) => {
+                  const cleanU = ch.username.toLowerCase().replace(/^@/, '');
+                  const st = sourceStatuses[cleanU];
+                  const isHealthy = st?.statusCategory === 'healthy' || (st && st.ok);
+                  const isFallback = st?.isFallbackActive;
+                  const activeReader = st?.activeReader || 'Jina Proxy';
+                  const lastReadTime = st?.lastSuccessfulReadTs ? formatTimeHHMMSS(st.lastSuccessfulReadTs) : '—';
+                  const lastMsgTime = st?.lastMessageTimeIso ? formatTimeHHMMSS(st.lastMessageTimeIso) : '—';
+
+                  return (
+                    <div key={ch.username} className="bg-black/40 p-2 rounded-lg border border-amber-950/80 flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleUserPriority(ch.username)}
+                            className="text-amber-400 hover:text-amber-300 text-xs shrink-0"
+                            title="Зняти пріоритет"
+                          >
+                            ★
+                          </button>
+                          <span className="font-bold text-slate-200 truncate">@{ch.username}</span>
+                          <span className={'text-[8px] font-mono px-1.5 py-0.2 rounded font-bold border ' + (
+                            isHealthy
+                              ? (isFallback ? 'bg-cyan-950 text-cyan-300 border-cyan-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800')
+                              : 'bg-rose-950 text-rose-300 border-rose-800'
+                          )}>
+                            {isHealthy ? (isFallback ? 'FALLBACK' : 'ONLINE') : 'OFFLINE'}
+                          </span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 truncate mt-0.5">{ch.title}</p>
+                        {st?.lastMessageText && (
+                          <p className="text-[9px] text-slate-300/80 truncate italic mt-0.5">
+                            "{st.lastMessageText.slice(0, 60)}..."
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3 text-[8px] text-slate-500 font-mono mt-1 flex-wrap">
+                          <span>Рідер: <strong className="text-cyan-300">{activeReader}</strong></span>
+                          <span>Успішний read: <strong className="text-slate-300">{lastReadTime}</strong></span>
+                          <span>Повідомлення: <strong className="text-slate-300">{lastMsgTime}</strong></span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* SOURCE BREAKDOWN CARDS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
               {/* 2. TELEGRAM CARD */}
@@ -2179,8 +2348,16 @@ export default function HomePage() {
 
                 return (
                   <div key={s.username} className={`flex items-center justify-between p-2 rounded ${isUserPriority ? 'bg-amber-950/20 border border-amber-800/40' : 'bg-[#070a10] border border-slate-800'}`}>
-                    <div className="min-w-0 pr-2">
+                    <div className="min-w-0 pr-2 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleUserPriority(s.username)}
+                          className={`p-0.5 rounded text-xs transition-all ${isUserPriority ? 'text-amber-400 hover:text-amber-300 font-bold' : 'text-slate-600 hover:text-amber-400'}`}
+                          title={isUserPriority ? '★ Зняти пріоритет' : '☆ Зробити USER PRIORITY'}
+                        >
+                          {isUserPriority ? '★' : '☆'}
+                        </button>
                         <span className={'w-2 h-2 rounded-full shrink-0 ' + (
                           isHealthy ? 'bg-emerald-400' :
                           isDisabled ? 'bg-slate-600' :
@@ -2189,7 +2366,7 @@ export default function HomePage() {
                         <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
                         {isUserPriority && (
                           <span className="text-[8px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-amber-600/50 flex items-center gap-0.5">
-                            ⭐ МОЇ ПРІОРИТЕТНІ
+                            ⭐ USER PRIORITY
                           </span>
                         )}
                         {isCritical && (
@@ -2201,7 +2378,7 @@ export default function HomePage() {
                           {isUserPriority || isCritical ? '• Кожен цикл' : '• Ротація'}
                         </span>
                       </div>
-                      <p className="text-[10px] text-slate-400 truncate">{s.title}</p>
+                      <p className="text-[10px] text-slate-400 truncate mt-0.5">{s.title}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <span className={'text-[9px] font-mono ' + (
@@ -2209,7 +2386,7 @@ export default function HomePage() {
                         isDisabled ? 'text-slate-500' :
                         'text-amber-400'
                       )}>
-                        {isHealthy ? 'АКТИВНИЙ' : isDisabled ? 'БЕЗ ПРЕВ’Ю' : 'ТИМЧАСОВО ОФЛАЙН'}
+                        {isHealthy ? (st?.isFallbackActive ? 'FALLBACK' : 'АКТИВНИЙ') : isDisabled ? 'БЕЗ ПРЕВ’Ю' : 'ТИМЧАСОВО ОФЛАЙН'}
                       </span>
                       {st?.error && !isHealthy && (
                         <span className="text-[8px] font-mono text-slate-500 block truncate max-w-[120px]">
