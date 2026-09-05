@@ -96,4 +96,5 @@ export interface Env {
   VAPID_SUBJECT?: string;
   ALERTS_API_TOKEN?: string;
   TELEGRAM_BOT_TOKEN?: string;
+  CRON_SECRET?: string;
 }

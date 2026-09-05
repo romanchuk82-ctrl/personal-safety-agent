@@ -3,21 +3,22 @@ import { KvStorage } from './kvStorage.js';
 import { SafetyEngine } from './safetyEngine.js';
 import { sendWebPush } from './webPush.js';
 
-function corsHeaders(): HeadersInit {
+function corsHeaders(): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Monitoring-Secret, X-Cron-Token',
     'Access-Control-Max-Age': '86400'
   };
 }
 
-function jsonResponse(data: any, status: number = 200): Response {
+function jsonResponse(data: any, status: number = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      ...corsHeaders()
+      ...corsHeaders(),
+      ...extraHeaders
     }
   });
 }
@@ -71,7 +72,31 @@ export default {
         });
       }
 
-      // 2. Register Web Push Subscription
+      // 1.2 Dedicated Production M2M Endpoint for cron-job.org (24/7 External Scheduler)
+      if (url.pathname === '/api/m2m/monitoring/cycle' || url.pathname === '/api/cron/cycle') {
+        const authHeader = request.headers.get('Authorization') || '';
+        const cronHeader = request.headers.get('X-Monitoring-Secret') || request.headers.get('X-Cron-Token') || '';
+        const querySecret = url.searchParams.get('secret') || url.searchParams.get('token') || '';
+
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim() || cronHeader.trim() || querySecret.trim();
+        const expectedSecret = env.CRON_SECRET || 'psa_cron_8f9c1b2e3d4a5e6f7a8b9c0d1e2f3a4b';
+
+        if (!token || token !== expectedSecret) {
+          return jsonResponse({ error: 'Unauthorized: invalid or missing cron secret token' }, 401);
+        }
+
+        const result = await SafetyEngine.runCycle(env);
+        return jsonResponse({
+          success: true,
+          message: 'Autonomous M2M monitoring cycle executed',
+          scheduler: 'cron-job.org',
+          timestamp: Date.now(),
+          ...result
+        }, 200, {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'X-Robots-Tag': 'noindex, nofollow'
+        });
+      }
       if (url.pathname === '/api/device/subscribe-push' && request.method === 'POST') {
         const body: any = await request.json().catch(() => ({}));
         const { deviceId, subscription, location } = body as {

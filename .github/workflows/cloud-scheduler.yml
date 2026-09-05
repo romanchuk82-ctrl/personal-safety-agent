@@ -1,0 +1,49 @@
+name: 24/7 Cloud Safety Scheduler
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Number of consecutive cycles'
+        required: false
+        default: '3'
+      delay_sec:
+        description: 'Delay between cycles (seconds)'
+        required: false
+        default: '60'
+
+concurrency:
+  group: cloud-scheduler
+  cancel-in-progress: false
+
+jobs:
+  run-monitoring-cycles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        run: |
+          npm install web-push --no-audit --no-fund
+
+      - name: Execute Autonomous Monitoring Cycles
+        env:
+          CF_ACCOUNT_ID: '7532116e9d16abfc6b7eded7a89c4f72'
+          CF_KV_NAMESPACE: '8d7944ad493e4455b7bd517a5784417f'
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CYCLE_ITERATIONS: ${{ github.event.inputs.iterations || '3' }}
+          CYCLE_DELAY_SEC: ${{ github.event.inputs.delay_sec || '60' }}
+        run: |
+          node scripts/cloud_safety_runner.mjs
