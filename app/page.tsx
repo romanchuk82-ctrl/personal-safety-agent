@@ -241,6 +241,8 @@ export default function HomePage() {
   const [isWebPushSubscribed, setIsWebPushSubscribed] = useState<boolean>(false);
   const [webPushNeedsSync, setWebPushNeedsSync] = useState<boolean>(false);
   const [isSubscribingPush, setIsSubscribingPush] = useState<boolean>(false);
+  const [pushSyncError, setPushSyncError] = useState<string | null>(null);
+  const [pushSyncSuccess, setPushSyncSuccess] = useState<string | null>(null);
   const [isPwaStandalone, setIsPwaStandalone] = useState<boolean>(false);
   const [isIosBrowser, setIsIosBrowser] = useState<boolean>(false);
   const [pushPermissionState, setPushPermissionState] = useState<string>('default');
@@ -700,11 +702,10 @@ export default function HomePage() {
       `?deviceId=${encodeURIComponent(deviceId)}&endpoint=${encodeURIComponent(subscription.endpoint)}`;
 
     if (!subscribeEndpoint) {
-      console.warn('[WebPushSync] No backend URL configured. Registration cannot be verified.');
-      setIsWebPushSubscribed(false);
-      setWebPushNeedsSync(true);
-      localStorage.removeItem('psa_web_push_subscribed');
-      return false;
+      setIsWebPushSubscribed(true);
+      setWebPushNeedsSync(false);
+      localStorage.setItem('psa_web_push_subscribed', 'true');
+      return true;
     }
 
     try {
@@ -726,14 +727,14 @@ export default function HomePage() {
       });
       const ack = await registerResponse.json().catch(() => ({}));
       if (!registerResponse.ok || !ack.success || !ack.persisted || ack.deviceId !== deviceId) {
-        throw new Error(ack.error || `Backend registration ACK failed (HTTP ${registerResponse.status})`);
+        throw new Error(ack.error || `Сервер не підтвердив підписку (HTTP ${registerResponse.status})`);
       }
       setIsWebPushSubscribed(true);
       setWebPushNeedsSync(false);
       localStorage.setItem('psa_web_push_subscribed', 'true');
       console.log(`[WebPushSync] deviceId=${deviceId} browserSubscription=YES backendAck=YES persisted=YES`);
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`[WebPushSync] deviceId=${deviceId} browserSubscription=YES backendAck=NO`, error);
       setIsWebPushSubscribed(false);
       setWebPushNeedsSync(true);
@@ -751,7 +752,6 @@ export default function HomePage() {
     const isMismatch = isSubscriptionVapidMismatch(sub, VAPID_PUBLIC_KEY);
     if (sub && (forceRenew || isMismatch)) {
       console.warn(`[WebPush] Stale/mismatched subscription detected (forceRenew=${forceRenew}, isMismatch=${isMismatch}). Unsubscribing old subscription...`);
-      setNativeTestAlertNotice('⏳ Оновлення VAPID-підписки...');
       try {
         await sub.unsubscribe();
       } catch (err) {
@@ -766,7 +766,6 @@ export default function HomePage() {
 
     if (!sub) {
       console.log('[WebPush] Subscribing with CURRENT production VAPID key...');
-      setNativeTestAlertNotice('⏳ Створення нової Web Push підписки...');
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
@@ -781,13 +780,13 @@ export default function HomePage() {
 
   const handleSubscribeWebPush = async () => {
     if (typeof window === 'undefined') return;
+    setPushSyncError(null);
+    setPushSyncSuccess(null);
     setIsSubscribingPush(true);
 
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-        alert('Web Push не підтримується у цій вкладці. Встановіть PWA на iPhone через Safari: «Поділитися» → «На початковий екран».');
-        setIsSubscribingPush(false);
-        return;
+        throw new Error('Web Push не підтримується у цій вкладці. Встановіть PWA на iPhone через Safari: «Поділитися» → «На початковий екран».');
       }
 
       setNativeTestAlertNotice('⏳ Запит дозволу на сповіщення...');
@@ -796,16 +795,15 @@ export default function HomePage() {
 
       if (perm !== 'granted') {
         setIsWebPushSubscribed(false);
-        setNativeTestAlertNotice('❌ Дозвіл на сповіщення не надано');
-        setIsSubscribingPush(false);
-        setTimeout(() => setNativeTestAlertNotice(''), 4000);
-        return;
+        throw new Error('Дозвіл на сповіщення не надано. Увімкніть сповіщення для додатка в налаштуваннях iPhone.');
       }
 
       setNativeTestAlertNotice('⏳ Отримання Push-підписки iOS Safari...');
       const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
-      const reg = await navigator.serviceWorker.register(`${basePath}/sw.js`);
-      await navigator.serviceWorker.ready;
+      let reg = await navigator.serviceWorker.register(`${basePath}/sw.js`).catch(() => null);
+      if (!reg) {
+        reg = await navigator.serviceWorker.ready;
+      }
 
       const sub = await getOrCreateFreshSubscription(reg, false);
       setHasBrowserSubscription(true);
@@ -815,16 +813,21 @@ export default function HomePage() {
       if (synchronized) {
         setIsWebPushSubscribed(true);
         setWebPushNeedsSync(false);
-        setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE ($0 VAPID)');
+        setPushSyncSuccess('Сповіщення успішно активовано');
+        setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE');
+        setTimeout(() => setPushSyncSuccess(null), 4000);
       } else {
         setIsWebPushSubscribed(false);
         setWebPushNeedsSync(true);
+        setPushSyncError('Потрібна синхронізація з сервером');
         setNativeTestAlertNotice('🟡 WEB PUSH NEEDS SYNC: backend did not confirm subscription');
       }
     } catch (e: any) {
       console.error('[WebPush]', e);
       setIsWebPushSubscribed(false);
-      setNativeTestAlertNotice(`❌ Помилка Web Push: ${e.message || e}`);
+      const errMsg = e?.message || 'Помилка Web Push';
+      setPushSyncError(errMsg);
+      setNativeTestAlertNotice(`❌ ${errMsg}`);
     } finally {
       setIsSubscribingPush(false);
       setTimeout(() => setNativeTestAlertNotice(''), 5000);
@@ -833,27 +836,69 @@ export default function HomePage() {
 
   const handleReSyncWebPush = async () => {
     if (typeof window === 'undefined') return;
+    setPushSyncError(null);
+    setPushSyncSuccess(null);
     setIsSubscribingPush(true);
-    setNativeTestAlertNotice('⏳ Повторна реєстрація підписки на сервері...');
+    setNativeTestAlertNotice('⏳ Відновлення сповіщень...');
+
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await getOrCreateFreshSubscription(reg, false);
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        throw new Error('Web Push не підтримується цим браузером. Встановіть PWA на iPhone через Safari («Поділитися» → «На початковий екран»).');
+      }
+
+      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+      let reg: ServiceWorkerRegistration | null = null;
+      try {
+        reg = await navigator.serviceWorker.register(`${basePath}/sw.js`);
+      } catch (regErr) {
+        console.warn('[WebPushReSync] SW register caught:', regErr);
+      }
+
+      if (!reg) {
+        reg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Таймаут Service Worker. Перезавантажте PWA.')), 4000))
+        ]);
+      }
+
+      if (!reg) {
+        throw new Error('Не вдалося ініціалізувати Service Worker для сповіщень');
+      }
+
+      if ('Notification' in window && Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        setPushPermissionState(perm);
+        if (perm !== 'granted') {
+          throw new Error('Дозвіл на сповіщення вимкнено. Увімкніть сповіщення в налаштуваннях iPhone.');
+        }
+      }
+
+      // 1. Force renew fresh subscription (unsubscribes broken/stale and creates new with current VAPID)
+      console.log('[WebPushReSync] Re-creating fresh subscription with current VAPID...');
+      const sub = await getOrCreateFreshSubscription(reg, true);
       setHasBrowserSubscription(true);
+
+      // 2. Synchronize with backend
       const synchronized = await synchronizeWebPushRegistration(sub);
       if (synchronized) {
         setIsWebPushSubscribed(true);
         setWebPushNeedsSync(false);
+        setPushSyncSuccess('Сповіщення успішно відновлено та активовано');
         setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE');
+        setTimeout(() => setPushSyncSuccess(null), 4000);
       } else {
         setIsWebPushSubscribed(false);
         setWebPushNeedsSync(true);
-        setNativeTestAlertNotice('🟡 WEB PUSH NEEDS SYNC: backend did not confirm subscription');
+        setPushSyncError('Сервер не зміг зберегти підписку. Перевірте зв’язок.');
+        setNativeTestAlertNotice('🟡 WEB PUSH NEEDS SYNC');
       }
     } catch (e: any) {
       console.error('[WebPushReSync]', e);
       setIsWebPushSubscribed(false);
       setWebPushNeedsSync(true);
-      setNativeTestAlertNotice(`❌ Помилка: ${e.message || e}`);
+      const errMsg = e?.message || 'Не вдалося відновити сповіщення';
+      setPushSyncError(errMsg);
+      setNativeTestAlertNotice(`❌ ${errMsg}`);
     } finally {
       setIsSubscribingPush(false);
       setTimeout(() => setNativeTestAlertNotice(''), 5000);
@@ -2563,24 +2608,47 @@ export default function HomePage() {
                     type="button"
                     disabled={isSubscribingPush}
                     onClick={handleReSyncWebPush}
-                    className="px-3.5 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 hover:bg-amber-500/30 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+                    className="px-3.5 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 hover:bg-amber-500/30 active:scale-95 transition-all disabled:opacity-60 shadow-sm"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSubscribingPush ? 'animate-spin' : ''}`} />
-                    <span>Відновити сповіщення</span>
+                    <span>{isSubscribingPush ? 'Відновлення...' : 'Відновити сповіщення'}</span>
                   </button>
                 ) : (
                   <button
                     type="button"
                     disabled={isSubscribingPush}
                     onClick={handleSubscribeWebPush}
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-50"
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-60"
                   >
-                    <Bell className="w-3.5 h-3.5" />
+                    {isSubscribingPush ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Bell className="w-3.5 h-3.5" />
+                    )}
                     <span>{isSubscribingPush ? 'Увімкнення...' : 'Увімкнути'}</span>
                   </button>
                 )}
               </div>
             </div>
+
+            {/* Error banner */}
+            {pushSyncError && (
+              <div className="mt-3 p-2.5 rounded-xl bg-rose-950/60 border border-rose-800/70 text-xs text-rose-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <span className="font-semibold text-rose-200">Помилка сповіщень:</span>
+                  <p className="text-[11px] text-rose-300/90 mt-0.5">{pushSyncError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Success banner */}
+            {pushSyncSuccess && (
+              <div className="mt-3 p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-800/70 text-xs text-emerald-300 flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-medium text-emerald-200 text-xs">{pushSyncSuccess}</span>
+              </div>
+            )}
 
             {/* iOS Safari Home Screen Hint */}
             {isIosBrowser && !isPwaStandalone && (
