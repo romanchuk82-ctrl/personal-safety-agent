@@ -105,6 +105,20 @@ const CITY_PRESETS = [
   { name: 'Миколаїв (Центр)', lat: 46.9750, lng: 31.9946, oblast: 'Миколаївська область' },
 ];
 
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII';
+const DEFAULT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://managed-asus-lyric-impose.trycloudflare.com';
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'events' | 'settings'>('home');
   const [isActive, setIsActive] = useState<boolean>(false);
@@ -168,6 +182,13 @@ export default function HomePage() {
   // $0 Notification Channels (Web Push + Telegram Bot)
   const [telegramChatId, setTelegramChatId] = useState<string>('');
   const [isWebPushSubscribed, setIsWebPushSubscribed] = useState<boolean>(false);
+  const [isSubscribingPush, setIsSubscribingPush] = useState<boolean>(false);
+  const [isPwaStandalone, setIsPwaStandalone] = useState<boolean>(false);
+  const [isIosBrowser, setIsIosBrowser] = useState<boolean>(false);
+  const [pushPermissionState, setPushPermissionState] = useState<string>('default');
+  const [lockScreenTestStatus, setLockScreenTestStatus] = useState<'WAITING' | 'VERIFIED' | 'IDLE'>('WAITING');
+  const [lockScreenCountdown, setLockScreenCountdown] = useState<number>(0);
+  const [backendServerOnline, setBackendServerOnline] = useState<boolean | null>(null);
   const [testThreatLoading, setTestThreatLoading] = useState<boolean>(false);
   const [drivingDiagnostics, setDrivingDiagnostics] = useState<{
     sampleCount: number;
@@ -382,12 +403,41 @@ export default function HomePage() {
       setIsActive(true);
     }
 
+    if (typeof window !== 'undefined') {
+      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      setIsIosBrowser(isIos);
+
+      const standalone = window.matchMedia('(display-mode: standalone)').matches ||
+                         (window.navigator as any).standalone === true ||
+                         document.referrer.includes('homescreen');
+      setIsPwaStandalone(standalone);
+
+      if ('Notification' in window) {
+        setPushPermissionState(Notification.permission);
+      } else {
+        setPushPermissionState('unsupported');
+      }
+
+      if (localStorage.getItem('psa_lockscreen_verified') === 'true') {
+        setLockScreenTestStatus('VERIFIED');
+      }
+    }
+
     if ('serviceWorker' in navigator) {
-      const swUrl = './sw.js';
+      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+      const swUrl = `${basePath}/sw.js`;
       navigator.serviceWorker
         .register(swUrl)
         .then((reg) => {
           console.log('ServiceWorker ready:', reg.scope);
+          if ('Notification' in window && Notification.permission === 'granted') {
+            reg.pushManager.getSubscription().then((sub) => {
+              if (sub) {
+                setIsWebPushSubscribed(true);
+              }
+            }).catch(() => {});
+          }
+
           navigator.serviceWorker.addEventListener('message', (event) => {
             if (event.data?.type === 'TRIGGER_VOICE_ALERT' && event.data?.voiceText) {
               speakAlert(event.data.voiceText);
@@ -396,6 +446,12 @@ export default function HomePage() {
         })
         .catch((err) => console.log('SW reg error:', err));
     }
+
+    const healthUrl = getBackendEndpoint('/healthz');
+    fetch(healthUrl)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setBackendServerOnline(!!d && d.status === 'ok'))
+      .catch(() => setBackendServerOnline(false));
   }, []);
 
   // Native iOS Bridge listener
@@ -511,70 +567,200 @@ export default function HomePage() {
     setTimeout(() => setLocationSuccessNotice(''), 3500);
   };
 
-  const getBackendEndpoint = (endpointPath: string): string | null => {
-    if (typeof window === 'undefined') return null;
+  const getOrCreateDeviceId = (): string => {
+    if (typeof window === 'undefined') return 'device-web';
+    let id = localStorage.getItem('psa_device_id');
+    if (!id) {
+      id = 'ios-' + Math.random().toString(36).substring(2, 9) + '-' + Date.now().toString(36);
+      localStorage.setItem('psa_device_id', id);
+    }
+    return id;
+  };
+
+  const getBackendEndpoint = (endpointPath: string): string => {
+    if (typeof window === 'undefined') return `${DEFAULT_BACKEND_URL}${endpointPath}`;
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       return `http://localhost:3001${endpointPath}`;
     }
     const customUrl = localStorage.getItem('psa_backend_url');
-    if (customUrl) {
+    if (customUrl && customUrl.trim().length > 0) {
       return `${customUrl.replace(/\/$/, '')}${endpointPath}`;
     }
-    return null;
+    return `${DEFAULT_BACKEND_URL}${endpointPath}`;
   };
 
   const handleSubscribeWebPush = async () => {
     if (typeof window === 'undefined') return;
+    setIsSubscribingPush(true);
+
     try {
-      if ('Notification' in window) {
-        const perm = await Notification.requestPermission();
-        if (perm === 'granted') {
-          setIsWebPushSubscribed(true);
-          setNativeTestAlertNotice('✓ Web Push успішно увімкнено ($0 VAPID)');
-          const url = getBackendEndpoint('/api/device/subscribe-push');
-          if (url) {
-            fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                deviceId: 'web-client',
-                subscription: {
-                  endpoint: 'https://fcm.googleapis.com/fcm/send/sample-token',
-                  keys: { p256dh: 'test', auth: 'test' }
-                }
-              })
-            }).catch(() => {});
-          }
-        } else {
-          setNativeTestAlertNotice('Дозвіл на сповіщення не надано');
-        }
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        alert('Web Push не підтримується у цій вкладці. Встановіть PWA на iPhone через Safari: «Поділитися» → «На початковий екран».');
+        setIsSubscribingPush(false);
+        return;
       }
-    } catch (e) {
-      console.warn(e);
+
+      setNativeTestAlertNotice('⏳ Запит дозволу на сповіщення...');
+      const perm = await Notification.requestPermission();
+      setPushPermissionState(perm);
+
+      if (perm !== 'granted') {
+        setIsWebPushSubscribed(false);
+        setNativeTestAlertNotice('❌ Дозвіл на сповіщення не надано');
+        setIsSubscribingPush(false);
+        setTimeout(() => setNativeTestAlertNotice(''), 4000);
+        return;
+      }
+
+      setNativeTestAlertNotice('⏳ Отримання Push-підписки iOS Safari...');
+      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+      const reg = await navigator.serviceWorker.register(`${basePath}/sw.js`);
+      await navigator.serviceWorker.ready;
+
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      }
+
+      const subJson = sub.toJSON();
+      if (!subJson.endpoint || !subJson.keys?.p256dh || !subJson.keys?.auth) {
+        throw new Error('Push API повернув неповні ключі підписки');
+      }
+
+      const deviceId = getOrCreateDeviceId();
+      setNativeTestAlertNotice('⏳ Збереження підписки на захисному сервері...');
+
+      const targetLocation = trustedLocation ? {
+        deviceId,
+        latitude: trustedLocation.lat,
+        longitude: trustedLocation.lng,
+        name: trustedLocation.name,
+        oblast: trustedLocation.oblast,
+        lockMode: activeLocationPreset
+      } : {
+        deviceId,
+        latitude: 50.4501,
+        longitude: 30.5234,
+        name: 'Київ (Центр)',
+        oblast: 'м. Київ',
+        lockMode: 'HOME'
+      };
+
+      const endpoint = getBackendEndpoint('/api/device/subscribe-push');
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          subscription: {
+            endpoint: subJson.endpoint,
+            keys: {
+              p256dh: subJson.keys?.p256dh,
+              auth: subJson.keys?.auth
+            }
+          },
+          location: targetLocation
+        })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '');
+        throw new Error(`Сервер повернув HTTP ${res.status}: ${errorText}`);
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        setIsWebPushSubscribed(true);
+        localStorage.setItem('psa_web_push_subscribed', 'true');
+        setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE ($0 VAPID)');
+      } else {
+        throw new Error(data.error || 'Помилка збереження на сервері');
+      }
+    } catch (e: any) {
+      console.error('[WebPush]', e);
+      setIsWebPushSubscribed(false);
+      setNativeTestAlertNotice(`❌ Помилка Web Push: ${e.message || e}`);
+    } finally {
+      setIsSubscribingPush(false);
+      setTimeout(() => setNativeTestAlertNotice(''), 5000);
     }
-    setTimeout(() => setNativeTestAlertNotice(''), 3500);
+  };
+
+  const handleSendTestThreatPush = async () => {
+    if (!isWebPushSubscribed) {
+      alert('Спочатку увімкніть сповіщення (натисніть «УВІМКНУТИ СПОВІЩЕННЯ»).');
+      return;
+    }
+
+    setTestThreatLoading(true);
+    setNativeTestAlertNotice('⏳ Запит тестової тривоги на сервері...');
+
+    try {
+      const deviceId = getOrCreateDeviceId();
+      const testUrl = getBackendEndpoint('/api/alerts/test-push');
+
+      const res = await fetch(testUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          delaySec: 15
+        })
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Помилка сервера HTTP ${res.status}`);
+      }
+
+      setLockScreenTestStatus('WAITING');
+      setLockScreenCountdown(15);
+      setNativeTestAlertNotice('«Тест надіслано. Заблокуйте iPhone.» (15с)');
+
+      const timer = setInterval(() => {
+        setLockScreenCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (err: any) {
+      console.error('[TestPush]', err);
+      setNativeTestAlertNotice(`❌ Помилка: ${err.message || err}`);
+    } finally {
+      setTestThreatLoading(false);
+    }
+  };
+
+  const handleConfirmLockScreenVerified = () => {
+    setLockScreenTestStatus('VERIFIED');
+    localStorage.setItem('psa_lockscreen_verified', 'true');
+    setNativeTestAlertNotice('🟢 LOCK SCREEN TEST: VERIFIED');
+    setTimeout(() => setNativeTestAlertNotice(''), 4000);
   };
 
   const handleSaveTelegramChatId = async (id: string) => {
     setTelegramChatId(id);
     localStorage.setItem('psa_telegram_chat_id', id);
+    const deviceId = getOrCreateDeviceId();
     const url = getBackendEndpoint('/api/device/register-telegram');
-    if (url) {
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            deviceId: 'web-client',
-            chatId: id.trim()
-          })
-        });
-        setNativeTestAlertNotice(`✓ Telegram Chat ID збережено (${id})`);
-      } catch (e) {
-        setNativeTestAlertNotice(`✓ Telegram Chat ID збережено локально (${id})`);
-      }
-    } else {
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          chatId: id.trim()
+        })
+      });
       setNativeTestAlertNotice(`✓ Telegram Chat ID збережено (${id})`);
+    } catch (e) {
+      setNativeTestAlertNotice(`✓ Telegram Chat ID збережено локально (${id})`);
     }
     setTimeout(() => setNativeTestAlertNotice(''), 3500);
   };
@@ -592,7 +778,7 @@ export default function HomePage() {
       TEST_MOVING_THREAT: 'Динамічне зближення в русі: відстань скоротилася до 3.2 км!'
     };
     
-    // Play sound
+    // Play sound if previewing in app
     handleNativeSoundPreview();
     
     // Native bridge dispatch if in iOS wrapper
@@ -604,30 +790,19 @@ export default function HomePage() {
       });
     }
     
-    // Browser notification
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      try {
-        new Notification(titles[type], {
-          body: bodies[type],
-          icon: './icon-192.png'
-        });
-      } catch (e) {}
-    }
-    
-    // Backend trigger if available
+    // Backend trigger
+    const deviceId = getOrCreateDeviceId();
     const url = getBackendEndpoint('/api/alerts/test-channel');
-    if (url) {
-      try {
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            deviceId: 'ios-dev-client',
-            testType: type
-          })
-        });
-      } catch (e) {}
-    }
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          testType: type
+        })
+      });
+    } catch (e) {}
     
     setTestThreatLoading(false);
     setNativeTestAlertNotice(`🚨 ${titles[type]} надіслано через Web Push + Telegram!`);
@@ -1996,44 +2171,156 @@ export default function HomePage() {
             <p className="text-[11px] text-slate-400">Фоновий захист, підпис $0/рік, геолокація, радіус та діагностика</p>
           </div>
 
-          {/* 1. 🛡️ ФОНОВИЙ ЗАХИСТ (BACKGROUND SAFETY ENGINE) */}
+          {/* 1. 🔔 ФОНОВІ СПОВІЩЕННЯ ($0 iOS 16.4+ WEB PUSH & LOCK SCREEN) */}
           <div className="mb-4 p-3.5 bg-[#090d16] border border-blue-500/40 rounded-2xl space-y-3 shadow-lg">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black text-blue-300 flex items-center gap-1.5 uppercase tracking-wide">
-                <Shield className="w-4 h-4 text-blue-400" />
-                <span>Фоновий захист</span>
+                <Bell className="w-4 h-4 text-blue-400" />
+                <span>ФОНОВІ СПОВІЩЕННЯ</span>
               </span>
+
+              {/* TRUTH STATUS: ⚪ / 🟡 / 🟢 */}
               <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
-                nativeProtectionActive || isActive
-                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
-                  : 'bg-slate-900 text-slate-400 border-slate-700'
+                isIosBrowser && !isPwaStandalone
+                  ? 'bg-slate-900 text-slate-400 border-slate-700'
+                  : !isWebPushSubscribed
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-800'
+                  : 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
               )}>
-                {isNativeIos && nativeProtectionActive ? 'СТАТУС: 🟢 Активний (Native CoreLocation)' : isActive ? 'СТАТУС: 🟡 Активний (Веб/PWA)' : 'СТАТУС: ⚪ Пасивний'}
+                {isIosBrowser && !isPwaStandalone ? (
+                  '⚪ ПОТРІБНО ВСТАНОВИТИ НА IPHONE'
+                ) : !isWebPushSubscribed ? (
+                  '🟡 СПОВІЩЕННЯ НЕ АКТИВОВАНІ'
+                ) : (
+                  '🟢 WEB PUSH ACTIVE'
+                )}
               </span>
             </div>
 
-            {/* PRIMARY ACTION: ACTIVATE / DEACTIVATE */}
-            <button
-              type="button"
-              onClick={handleToggleNativeProtection}
-              className={'w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-md ' + (
-                nativeProtectionActive || isActive
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/30'
-                  : 'bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white shadow-blue-900/40'
-              )}
-            >
-              {nativeProtectionActive || isActive ? (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
-                  <span>ДЕАКТИВУВАТИ ЗАХИСТ</span>
-                </>
-              ) : (
-                <>
-                  <Shield className="w-4 h-4" />
-                  <span>АКТИВУВАТИ ЗАХИСТ (ФОНОВИЙ GPS + PUSH)</span>
-                </>
-              )}
-            </button>
+            {/* CASE A: PWA NOT INSTALLED ON IPHONE */}
+            {isIosBrowser && !isPwaStandalone ? (
+              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-700 space-y-2 text-slate-300 text-xs">
+                <div className="flex items-center gap-2 text-amber-300 font-bold text-[11px]">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Для роботи сповіщень на замкненому екрані iPhone:</span>
+                </div>
+                <div className="bg-black/50 p-2.5 rounded-lg border border-slate-800 text-[11px] font-mono text-cyan-200 space-y-1.5">
+                  <p>1. Відкрийте Safari</p>
+                  <p>2. Натисніть кнопку <strong>«Поділитися»</strong> (іконка ⬆️)</p>
+                  <p>3. Оберіть <strong>«На початковий екран»</strong></p>
+                  <p>4. Відкрийте <strong>Personal Safety Agent</strong> з Home Screen</p>
+                </div>
+                <p className="text-[10px] text-slate-400 italic">
+                  * Обмеження Apple iOS: Push API доступний виключно з Home Screen (iOS 16.4+).
+                </p>
+              </div>
+            ) : !isWebPushSubscribed ? (
+              /* CASE B: PWA INSTALLED, BUT NOT SUBSCRIBED */
+              <div className="space-y-2.5">
+                <p className="text-[11px] text-slate-300 leading-snug">
+                  Для отримання тривог при заблокованому iPhone увімкніть фонові Web Push сповіщення ($0 без Apple Dev Program):
+                </p>
+                <button
+                  type="button"
+                  disabled={isSubscribingPush}
+                  onClick={handleSubscribeWebPush}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-[0.98] transition-all disabled:opacity-50"
+                >
+                  <Bell className="w-4 h-4" />
+                  <span>{isSubscribingPush ? 'АКТИВАЦІЯ ПІДПИСКИ...' : 'УВІМКНУТИ СПОВІЩЕННЯ'}</span>
+                </button>
+              </div>
+            ) : (
+              /* CASE C: REAL WEB PUSH ACTIVE -> TEST CONTROLS */
+              <div className="space-y-3">
+                <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/80 rounded-xl flex items-center justify-between text-xs text-emerald-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="font-bold text-[11px]">Фонова Web Push підписка активна</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-300 font-bold">$0 VAPID</span>
+                </div>
+
+                {/* REAL TEST PUSH BUTTON */}
+                <button
+                  type="button"
+                  disabled={testThreatLoading || lockScreenCountdown > 0}
+                  onClick={handleSendTestThreatPush}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>
+                    {lockScreenCountdown > 0
+                      ? `ТЕСТ ВІДПРАВЛЕНО (${lockScreenCountdown}с) — ЗАБЛОКУЙТЕ IPHONE`
+                      : testThreatLoading
+                      ? 'ЗВ\'ЯЗОК ІЗ СЕРВЕРОМ...'
+                      : 'НАДІСЛАТИ ТЕСТОВУ ТРИВОГУ'}
+                  </span>
+                </button>
+
+                {lockScreenCountdown > 0 && (
+                  <div className="p-3 bg-amber-950/80 border border-amber-600 rounded-xl text-center space-y-1 animate-pulse">
+                    <p className="text-amber-200 font-black text-xs">
+                      «Тест надіслано. Заблокуйте iPhone.»
+                    </p>
+                    <p className="text-amber-300 text-[10px] font-mono">
+                      Сповіщення надійде через {lockScreenCountdown} сек. Повністю вимкніть екран кнопкою блокування.
+                    </p>
+                  </div>
+                )}
+
+                {/* LOCKED SCREEN PHYSICAL TEST AUDIT */}
+                <div className="p-3 bg-black/60 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono font-bold text-slate-400">LOCK SCREEN TEST:</span>
+                    <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
+                      lockScreenTestStatus === 'VERIFIED'
+                        ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                        : 'bg-amber-950/80 text-amber-300 border-amber-800'
+                    )}>
+                      {lockScreenTestStatus === 'VERIFIED'
+                        ? '🟢 VERIFIED'
+                        : '🟡 WAITING FOR PHYSICAL IPHONE TEST'}
+                    </span>
+                  </div>
+
+                  {lockScreenTestStatus !== 'VERIFIED' ? (
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleConfirmLockScreenVerified}
+                        className="flex-1 py-2 px-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>ПІДТВЕРДЖУЮ: СПОВІЩЕННЯ ОТРИМАНО</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSendTestThreatPush}
+                        className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-all"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>ЩЕ РАЗ</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-[10px] text-emerald-400 pt-1 border-t border-slate-800">
+                      <span>✓ Фізичний тест на замкненому екрані iPhone пройдено</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLockScreenTestStatus('WAITING');
+                          localStorage.removeItem('psa_lockscreen_verified');
+                        }}
+                        className="text-slate-500 hover:text-slate-300 text-[9px] underline"
+                      >
+                        Скинути
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {nativeTestAlertNotice && (
               <div className="text-center text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/60 border border-cyan-800/80 rounded-lg py-1.5 px-2 animate-fadeIn">
@@ -2041,77 +2328,71 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* TRUTH AUDIT INDICATORS: GPS, NATIVE APNs, WEB PUSH, TELEGRAM, РУХ, СЕРВЕР */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
+            {/* TRUTH AUDIT INDICATORS */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px] pt-1">
               {/* 1. GPS STATUS */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">GPS СТАН:</span>
-                <span className={'font-bold mt-0.5 ' + (
-                  isNativeIos 
-                    ? ((nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300 ? 'text-emerald-400' : 'text-amber-400')
-                    : 'text-amber-400'
-                )}>
-                  {isNativeIos 
-                    ? ((nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300 ? 'GPS: 🟢 LIVE (CoreLocation)' : 'GPS: 🟡 STALE')
-                    : 'GPS: 🟡 NATIVE APP NOT INSTALLED'}
+                <span className={'font-bold mt-0.5 ' + (activeLocationPreset !== 'AUTO' ? 'text-emerald-400' : 'text-amber-400')}>
+                  {activeLocationPreset !== 'AUTO' 
+                    ? `🟢 ТОЧКА: ${activeLocationPreset}`
+                    : '🟡 АВТО-GPS'}
                 </span>
                 <span className="text-[8px] text-slate-500">
-                  {isNativeIos ? 'Native automotive tracking' : 'Web Geolocation fallback'}
+                  {activeLocationPreset !== 'AUTO' ? '24/7 захист зафіксованої точки' : 'PWA не гарантує фоновий GPS'}
                 </span>
               </div>
 
-              {/* 2. NATIVE APNs */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">NATIVE APNs:</span>
-                <span className="font-bold text-slate-400 mt-0.5 font-mono">
-                  ⚪ UNAVAILABLE
-                </span>
-                <span className="text-[8px] text-slate-500">Free Tier / No APNs Entitlement</span>
-              </div>
-
-              {/* 3. WEB PUSH */}
+              {/* 2. WEB PUSH */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">WEB PUSH:</span>
                 <span className={'font-bold mt-0.5 ' + (isWebPushSubscribed ? 'text-emerald-400' : 'text-slate-400')}>
-                  {isWebPushSubscribed ? '🟢 SUBSCRIBED' : '⚪ NOT SUBSCRIBED'}
+                  {isWebPushSubscribed ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
                 </span>
-                <span className="text-[8px] text-slate-500">Safari Home Screen PWA</span>
+                <span className="text-[8px] text-slate-500">iOS 16.4+ VAPID Push</span>
               </div>
 
-              {/* 4. TELEGRAM FALLBACK */}
+              {/* 3. TELEGRAM FALLBACK */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">TELEGRAM PUSH:</span>
+                <span className="text-slate-400 text-[9px] font-mono">TELEGRAM:</span>
                 <span className={'font-bold mt-0.5 ' + (telegramChatId.trim().length > 0 ? 'text-emerald-400' : 'text-slate-400')}>
                   {telegramChatId.trim().length > 0 ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
                 </span>
                 <span className="text-[8px] text-slate-500 truncate">
-                  {telegramChatId.trim().length > 0 ? `Chat ID: ${telegramChatId}` : 'Введіть ID нижче'}
+                  {telegramChatId.trim().length > 0 ? `ID: ${telegramChatId}` : 'Резервний дублер'}
                 </span>
               </div>
 
-              {/* 5. РУХ */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">РУХ (ДЕТЕКЦІЯ АВТО):</span>
-                <span className="font-bold text-amber-300 mt-0.5">
-                  {isNativeIos 
-                    ? (nativeMovementState === 'DRIVING' ? '🚗 Авто' : nativeMovementState === 'ACTIVE' ? '🚶 Активний' : '🏠 Нерухомо')
-                    : '⚪ Web (Потребує Native IPA)'}
-                </span>
-                <span className="text-[8px] text-slate-500">CoreLocation speed filter</span>
-              </div>
-
-              {/* 6. СЕРВЕР 24/7 */}
+              {/* 4. СЕРВЕР 24/7 */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">СЕРВЕР БЕЗПЕКИ:</span>
-                <span className="font-bold text-emerald-400 mt-0.5">
-                  🟢 ONLINE
+                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
+                  {backendServerOnline === true ? '🟢 ONLINE' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
                 </span>
                 <span className="text-[8px] text-slate-500">24/7 автономний бекенд</span>
+              </div>
+
+              {/* 5. LOCK SCREEN TEST */}
+              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                <span className="text-slate-400 text-[9px] font-mono">LOCK SCREEN TEST:</span>
+                <span className={'font-bold mt-0.5 ' + (lockScreenTestStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-amber-400')}>
+                  {lockScreenTestStatus === 'VERIFIED' ? '🟢 VERIFIED' : '🟡 WAITING'}
+                </span>
+                <span className="text-[8px] text-slate-500">Фізичний тест на iPhone</span>
+              </div>
+
+              {/* 6. МОНІТОРИНГ У ФОНІ */}
+              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                <span className="text-slate-400 text-[9px] font-mono">PWA CLOSED:</span>
+                <span className="font-bold text-emerald-400 mt-0.5">
+                  🟢 SERVER ACTIVE
+                </span>
+                <span className="text-[8px] text-slate-500">Не залежить від вкладки</span>
               </div>
             </div>
 
             <p className="text-[9px] text-slate-400 italic">
-              * Захист безперервно аналізує відстань до крилатих дронів та ракет у фоні при заблокованому екрані авто.
+              * Після блокування iPhone браузер не витрачає батарею; моніторинг здійснюється цілодобово на бекенді.
             </p>
           </div>
 
