@@ -109,6 +109,13 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
     });
   }
   endpoints.push({
+    name: 'cors_sh',
+    url: `https://proxy.cors.sh/${directUrl}`,
+    headers: {
+      Accept: 'application/json'
+    }
+  });
+  endpoints.push({
     name: 'jina',
     url: `https://r.jina.ai/${directUrl}`,
     headers: {
