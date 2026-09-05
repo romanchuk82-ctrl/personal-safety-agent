@@ -62,7 +62,22 @@ public class NotificationEngine: NSObject, UNUserNotificationCenterDelegate {
         print("[NotificationEngine] Registered APNs token: \(token)")
     }
     
-    // MARK: - Local Sound Preview
+    // MARK: - Local Sound Preview & Alert
+    public func scheduleLocalAlert(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = UNNotificationSound.default
+        
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("[NotificationEngine] Error scheduling local alert: \(error.localizedDescription)")
+            }
+        }
+        playPreviewSound()
+    }
+
     public func playPreviewSound() {
         guard let soundUrl = Bundle.main.url(forResource: "danger_alarm", withExtension: "wav") else {
             print("[NotificationEngine] danger_alarm.wav not found in bundle.")

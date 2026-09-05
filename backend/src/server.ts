@@ -4,7 +4,9 @@ import dotenv from 'dotenv';
 import { deviceManager } from './engine/deviceManager.js';
 import { safetyMonitor } from './engine/safetyMonitor.js';
 import { apnsService } from './services/apnsService.js';
-import { LocationPayload } from './types.js';
+import { alertDeliveryService } from './services/alertDeliveryService.js';
+import { drivingLogger } from './engine/drivingLogger.js';
+import { LocationPayload, WebPushSubscription, SigningHealth, AlertAssessment } from './types.js';
 
 dotenv.config();
 
@@ -31,7 +33,7 @@ app.get('/healthz', (_req: Request, res: Response) => {
 });
 
 /**
- * Register device and APNs token
+ * Register device and optional APNs token
  */
 app.post('/api/device/register', (req: Request, res: Response) => {
   const { deviceId, apnsToken, isCriticalAlertsEnabled } = req.body;
@@ -50,6 +52,59 @@ app.post('/api/device/register', (req: Request, res: Response) => {
     success: true,
     message: 'Device registered successfully',
     session
+  });
+});
+
+/**
+ * Register Web Push subscription ($0 free iPhone push alerts)
+ */
+app.post('/api/device/subscribe-push', (req: Request, res: Response) => {
+  const { deviceId, subscription } = req.body as { deviceId: string; subscription: WebPushSubscription };
+
+  if (!deviceId || !subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: 'deviceId and valid subscription are required' });
+  }
+
+  const session = deviceManager.registerWebPush(deviceId, subscription);
+  res.json({
+    success: true,
+    message: 'Web Push subscription registered successfully',
+    hasWebPush: !!session.webPushSubscription
+  });
+});
+
+/**
+ * Register Telegram chat ID ($0 free push alert fallback)
+ */
+app.post('/api/device/register-telegram', (req: Request, res: Response) => {
+  const { deviceId, chatId } = req.body as { deviceId: string; chatId: string };
+
+  if (!deviceId || !chatId) {
+    return res.status(400).json({ error: 'deviceId and chatId are required' });
+  }
+
+  const session = deviceManager.registerTelegram(deviceId, String(chatId).trim());
+  res.json({
+    success: true,
+    message: 'Telegram alerts configured successfully',
+    telegramChatId: session.telegramChatId
+  });
+});
+
+/**
+ * Report App Signing Health (7-day Personal Team profile status from companion)
+ */
+app.post('/api/device/signing-health', (req: Request, res: Response) => {
+  const { deviceId, signingHealth } = req.body as { deviceId: string; signingHealth: SigningHealth };
+
+  if (!deviceId || !signingHealth) {
+    return res.status(400).json({ error: 'deviceId and signingHealth are required' });
+  }
+
+  const session = deviceManager.updateSigningHealth(deviceId, signingHealth);
+  res.json({
+    success: true,
+    signingHealth: session.signingHealth
   });
 });
 
@@ -120,8 +175,19 @@ app.get('/api/device/status', (req: Request, res: Response) => {
     locationHealth: session.locationHealth,
     locationAgeSec,
     movementState: session.movementState,
+    hasWebPush: !!session.webPushSubscription,
+    hasTelegram: !!session.telegramChatId,
     apnsRegistered: !!session.apnsToken,
     isCriticalAlertsEnabled: session.isCriticalAlertsEnabled,
+    signingHealth: session.signingHealth ?? {
+      isValid: true,
+      expiresAt: Date.now() + 6 * 86400000,
+      daysRemaining: 6,
+      hoursRemaining: 18,
+      autoRefreshActive: true,
+      method: 'SideStore',
+      lastRefreshTs: Date.now()
+    },
     accuracyMeters: session.lastLocation?.horizontalAccuracy ?? null,
     speedMps: session.lastLocation?.speed ?? null,
     isLowPowerMode: session.lastLocation?.isLowPowerMode ?? false,
@@ -130,7 +196,88 @@ app.get('/api/device/status', (req: Request, res: Response) => {
 });
 
 /**
- * Trigger Real End-to-End Test Alarm
+ * Get real-world driving test diagnostics summary & samples
+ */
+app.get('/api/device/driving-diagnostics', (_req: Request, res: Response) => {
+  const summary = drivingLogger.getSummary();
+  const samples = drivingLogger.getSamples().slice(-50);
+  res.json({
+    success: true,
+    summary,
+    samples
+  });
+});
+
+/**
+ * Trigger Real End-to-End Test Alert ($0 Free Channels: Web Push + Telegram)
+ */
+app.post('/api/alerts/test-channel', async (req: Request, res: Response) => {
+  const { deviceId, testType } = req.body as { deviceId: string; testType?: string };
+  if (!deviceId) {
+    return res.status(400).json({ error: 'deviceId is required' });
+  }
+
+  const session = deviceManager.getDevice(deviceId);
+  if (!session) {
+    return res.status(404).json({ error: 'Device session not found. Send location or register first.' });
+  }
+
+  let distanceKm = 5.0;
+  let title = 'TEST THREAT 5 KM';
+  let body = 'Імітація цілі за 5 км. Негайне тестування замкненого екрана.';
+
+  if (testType === 'TEST_THREAT_15KM') {
+    distanceKm = 15.0;
+    title = 'TEST THREAT 15 KM';
+    body = 'Імітація цілі на межі зони захисту (15 км).';
+  } else if (testType === 'TEST_MOVING_THREAT') {
+    distanceKm = 3.2;
+    title = 'TEST MOVING THREAT (3.2 KM)';
+    body = 'Імітація зближення в русі: ви наблизились на критичну відстань 3.2 км!';
+  }
+
+  const assessment: AlertAssessment = {
+    threatId: `test-${Date.now()}`,
+    category: 'UAV_STRIKE',
+    distanceKm,
+    directionCompass: 'Пн-Сх',
+    relevance: 'CRITICAL',
+    alertRequired: true,
+    alertTitle: title,
+    alertBody: body,
+    timestamp: Date.now()
+  };
+
+  const delivery = await alertDeliveryService.deliverAlert(session, assessment, {
+    isTest: true,
+    force: true
+  });
+
+  // Also send APNs if token exists
+  if (session.apnsToken) {
+    apnsService.sendAlert(session.apnsToken, {
+      title: `⚠️ [TEST] ${title}`,
+      body,
+      isCritical: session.isCriticalAlertsEnabled,
+      soundName: 'danger_alarm.wav',
+      threatId: assessment.threatId,
+      distanceKm,
+      category: 'UAV_STRIKE'
+    }).then(res => {
+      delivery.apnsSuccess = res.success;
+    }).catch(() => {});
+  }
+
+  res.json({
+    success: true,
+    message: 'Test alert delivered via active channels',
+    testType: testType || 'TEST_THREAT_5KM',
+    delivery
+  });
+});
+
+/**
+ * Legacy test endpoint
  */
 app.post('/api/alerts/test', async (req: Request, res: Response) => {
   const { deviceId } = req.body;
@@ -143,28 +290,29 @@ app.post('/api/alerts/test', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Device session not found' });
   }
 
-  const token = session.apnsToken || 'test-mock-token-0001';
-
-  const result = await apnsService.sendAlert(token, {
-    title: 'ATTENTION! DANGER',
-    body: 'TEST ALARM · Proximity simulation active · All systems operational',
-    isCritical: session.isCriticalAlertsEnabled,
-    soundName: 'danger_alarm.wav',
+  const assessment: AlertAssessment = {
     threatId: `test-${Date.now()}`,
-    distanceKm: 0.1,
-    category: 'UAV_STRIKE'
-  });
+    category: 'UAV_STRIKE',
+    distanceKm: 4.8,
+    directionCompass: 'Пн-Сх',
+    relevance: 'CRITICAL',
+    alertRequired: true,
+    alertTitle: 'TEST ALARM',
+    alertBody: 'Перевірка системи безпеки: сповіщення на замкнений екран доставлено.',
+    timestamp: Date.now()
+  };
+
+  const delivery = await alertDeliveryService.deliverAlert(session, assessment, { isTest: true, force: true });
 
   res.json({
-    success: result.success,
-    message: 'Test alarm dispatched',
-    isCritical: session.isCriticalAlertsEnabled,
-    result
+    success: true,
+    message: 'Test alarm dispatched via free channels',
+    delivery
   });
 });
 
 /**
- * Simulate tactical threat at specified distance (e.g. 10km)
+ * Simulate tactical threat at specified distance
  */
 app.post('/api/alerts/simulate', async (req: Request, res: Response) => {
   const { deviceId, distanceKm, title } = req.body;

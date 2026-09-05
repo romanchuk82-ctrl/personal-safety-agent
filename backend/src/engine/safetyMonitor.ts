@@ -1,6 +1,7 @@
 import { ThreatEvent, DeviceSession, AlertAssessment } from '../types.js';
 import { deviceManager } from './deviceManager.js';
 import { evaluateThreatProximity, shouldReAlertMovingUser } from './threatDistance.js';
+import { alertDeliveryService } from '../services/alertDeliveryService.js';
 import { apnsService } from '../services/apnsService.js';
 
 export class SafetyMonitor {
@@ -89,16 +90,25 @@ export class SafetyMonitor {
           const previousDistance = device.alertCooldowns[threat.id];
           const shouldAlert = shouldReAlertMovingUser(previousDistance, assessment.distanceKm);
 
-          if (shouldAlert && device.apnsToken) {
-            console.log(`[SafetyMonitor] Alerting Device ${device.deviceId} for threat ${threat.id} (dist: ${assessment.distanceKm} km)`);
-            await apnsService.sendAlert(device.apnsToken, {
-              title: assessment.alertTitle,
-              body: assessment.alertBody,
-              isCritical: device.isCriticalAlertsEnabled,
-              threatId: threat.id,
-              distanceKm: assessment.distanceKm,
-              category: threat.category
+          if (shouldAlert) {
+            console.log(`[SafetyMonitor] Delivering alert to Device ${device.deviceId} for threat ${threat.id} (dist: ${assessment.distanceKm.toFixed(1)} km)`);
+            
+            // Deliver through Web Push and Telegram (Free $0/year tier)
+            await alertDeliveryService.deliverAlert(device, assessment, {
+              isTest: threat.isSimulated
             });
+
+            // If APNs token exists, also forward
+            if (device.apnsToken) {
+              apnsService.sendAlert(device.apnsToken, {
+                title: assessment.alertTitle,
+                body: assessment.alertBody,
+                isCritical: device.isCriticalAlertsEnabled,
+                threatId: threat.id,
+                distanceKm: assessment.distanceKm,
+                category: threat.category
+              }).catch(() => {});
+            }
 
             deviceManager.recordAlertDispatched(device.deviceId, threat.id, assessment.distanceKm);
             alertsSent++;
@@ -125,15 +135,21 @@ export class SafetyMonitor {
         const prevDist = device.alertCooldowns[threat.id];
         const shouldAlert = shouldReAlertMovingUser(prevDist, assessment.distanceKm);
 
-        if (shouldAlert && device.apnsToken) {
-          await apnsService.sendAlert(device.apnsToken, {
-            title: assessment.alertTitle,
-            body: assessment.alertBody,
-            isCritical: device.isCriticalAlertsEnabled,
-            threatId: threat.id,
-            distanceKm: assessment.distanceKm,
-            category: threat.category
+        if (shouldAlert) {
+          await alertDeliveryService.deliverAlert(device, assessment, {
+            isTest: threat.isSimulated
           });
+
+          if (device.apnsToken) {
+            apnsService.sendAlert(device.apnsToken, {
+              title: assessment.alertTitle,
+              body: assessment.alertBody,
+              isCritical: device.isCriticalAlertsEnabled,
+              threatId: threat.id,
+              distanceKm: assessment.distanceKm,
+              category: threat.category
+            }).catch(() => {});
+          }
 
           deviceManager.recordAlertDispatched(device.deviceId, threat.id, assessment.distanceKm);
           sent++;

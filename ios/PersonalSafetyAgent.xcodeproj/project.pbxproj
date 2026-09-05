@@ -14,6 +14,7 @@
 		01000005 /* NotificationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000005 /* NotificationEngine.swift */; };
 		01000006 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000006 /* NativeBridge.swift */; };
 		01000007 /* danger_alarm.wav in Resources */ = {isa = PBXBuildFile; fileRef = 02000007 /* danger_alarm.wav */; };
+		01000008 /* SigningHealthEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000010 /* SigningHealthEngine.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		02000007 /* danger_alarm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = danger_alarm.wav; sourceTree = "<group>"; };
 		02000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		02000009 /* PersonalSafetyAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PersonalSafetyAgent.entitlements; sourceTree = "<group>"; };
+		02000010 /* SigningHealthEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningHealthEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +59,7 @@
 				02000004 /* LocationEngine.swift */,
 				02000005 /* NotificationEngine.swift */,
 				02000006 /* NativeBridge.swift */,
+				02000010 /* SigningHealthEngine.swift */,
 				04000004 /* Resources */,
 				02000008 /* Info.plist */,
 				02000009 /* PersonalSafetyAgent.entitlements */,
@@ -155,6 +158,7 @@
 				01000004 /* LocationEngine.swift in Sources */,
 				01000005 /* NotificationEngine.swift in Sources */,
 				01000006 /* NativeBridge.swift in Sources */,
+				01000008 /* SigningHealthEngine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

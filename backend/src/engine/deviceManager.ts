@@ -1,4 +1,6 @@
-import { DeviceSession, LocationPayload, LocationHealth, MovementState } from '../types.js';
+import { DeviceSession, LocationPayload, LocationHealth, MovementState, WebPushSubscription, SigningHealth } from '../types.js';
+import { drivingLogger } from './drivingLogger.js';
+import { haversineDistanceKm } from './threatDistance.js';
 
 export class DeviceManager {
   private devices: Map<string, DeviceSession> = new Map();
@@ -40,6 +42,45 @@ export class DeviceManager {
   }
 
   /**
+   * Register Web Push subscription for $0 free iPhone push alerts
+   */
+  public registerWebPush(deviceId: string, subscription: WebPushSubscription): DeviceSession {
+    let session = this.devices.get(deviceId);
+    if (!session) {
+      session = this.registerDevice(deviceId);
+    }
+    session.webPushSubscription = subscription;
+    session.updatedAt = Date.now();
+    return session;
+  }
+
+  /**
+   * Register Telegram chat ID for redundant free push alerts
+   */
+  public registerTelegram(deviceId: string, chatId: string): DeviceSession {
+    let session = this.devices.get(deviceId);
+    if (!session) {
+      session = this.registerDevice(deviceId);
+    }
+    session.telegramChatId = chatId;
+    session.updatedAt = Date.now();
+    return session;
+  }
+
+  /**
+   * Update app signing health (7-day free profile status)
+   */
+  public updateSigningHealth(deviceId: string, health: SigningHealth): DeviceSession {
+    let session = this.devices.get(deviceId);
+    if (!session) {
+      session = this.registerDevice(deviceId);
+    }
+    session.signingHealth = health;
+    session.updatedAt = Date.now();
+    return session;
+  }
+
+  /**
    * Updates location for a registered device and determines health & movement state.
    */
   public updateLocation(payload: LocationPayload): DeviceSession {
@@ -49,6 +90,18 @@ export class DeviceManager {
     }
 
     const now = Date.now();
+    let distanceMovedMeters = 0;
+
+    if (session.lastLocation) {
+      const distKm = haversineDistanceKm(
+        session.lastLocation.latitude,
+        session.lastLocation.longitude,
+        payload.latitude,
+        payload.longitude
+      );
+      distanceMovedMeters = Math.round(distKm * 1000);
+    }
+
     session.lastLocation = payload;
     session.lastReceivedTs = now;
     session.updatedAt = now;
@@ -65,6 +118,9 @@ export class DeviceManager {
 
     // Refresh health
     session.locationHealth = this.calculateLocationHealth(session.lastReceivedTs);
+
+    // Log driving sample if driving or actively moving
+    drivingLogger.logSample(payload, distanceMovedMeters);
 
     return session;
   }
@@ -96,6 +152,8 @@ export class DeviceManager {
 
   /**
    * Returns all active devices for background monitoring.
+   * Failsafe rule: STALE / OLD locations are NOT ignored;
+   * safety monitoring continues on last known coordinates!
    */
   public getActiveDevices(): DeviceSession[] {
     const active: DeviceSession[] = [];

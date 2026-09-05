@@ -39,6 +39,12 @@ public class NativeBridge: NSObject, WKScriptMessageHandler, LocationEngineDeleg
             NotificationEngine.shared.playPreviewSound()
             pushStatusToWeb()
             
+        case "SCHEDULE_LOCAL_ALERT":
+            if let title = body["title"] as? String, let alertBody = body["body"] as? String {
+                NotificationEngine.shared.scheduleLocalAlert(title: title, body: alertBody)
+            }
+            pushStatusToWeb()
+            
         default:
             print("[NativeBridge] Unknown action: \(action)")
         }
@@ -47,6 +53,7 @@ public class NativeBridge: NSObject, WKScriptMessageHandler, LocationEngineDeleg
     // MARK: - Native -> Web Dispatch
     public func pushStatusToWeb() {
         let loc = LocationEngine.shared.lastLocation
+        let signing = SigningHealthEngine.shared.checkHealth()
         let status: [String: Any] = [
             "isNativeIos": true,
             "protectionActive": LocationEngine.shared.isTrackingActive,
@@ -59,7 +66,14 @@ public class NativeBridge: NSObject, WKScriptMessageHandler, LocationEngineDeleg
             "longitude": loc?.coordinate.longitude ?? 0,
             "accuracy": loc?.horizontalAccuracy ?? -1,
             "speed": loc?.speed ?? -1,
-            "lastServerSync": LocationEngine.shared.lastServerSyncDate?.timeIntervalSince1970 ?? 0
+            "lastServerSync": LocationEngine.shared.lastServerSyncDate?.timeIntervalSince1970 ?? 0,
+            "signingHealth": [
+                "daysRemaining": signing.daysRemaining,
+                "expirationDate": signing.expirationDate?.timeIntervalSince1970 ?? 0,
+                "teamName": signing.teamName ?? "Personal Team",
+                "isProfileValid": signing.isProfileValid,
+                "autoRefreshMechanism": signing.autoRefreshMechanism
+            ]
         ]
         
         guard let jsonData = try? JSONSerialization.data(withJSONObject: status),
