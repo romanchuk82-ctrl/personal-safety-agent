@@ -1001,6 +1001,16 @@ export const TELEGRAM_READERS: TelegramReader[] = [
     isBrowserSupported: true,
   },
   {
+    id: 'cors_sh',
+    name: 'Cors.sh Proxy',
+    buildUrl: (u) => `https://proxy.cors.sh/https://t.me/s/${u}`,
+    headers: () => ({
+      'Accept': 'text/html',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }),
+    isBrowserSupported: true,
+  },
+  {
     id: 'allorigins_json',
     name: 'AllOrigins API',
     buildUrl: (u) => `https://api.allorigins.win/get?url=${encodeURIComponent('https://t.me/s/' + u)}`,
@@ -1215,7 +1225,7 @@ export async function fetchChannelMessages(
     ...availableReaders.filter(r => r.id !== preferred.id)
   ];
 
-  const perReaderTimeoutMs = options?.timeoutMs || (options?.force ? 2800 : 3800);
+  const perReaderTimeoutMs = Math.min(options?.timeoutMs || 3500, 4000);
   let lastError = 'Тимчасово не відповідає';
   let isTimeout = false;
 
@@ -1241,11 +1251,6 @@ export async function fetchChannelMessages(
         signal: controller.signal,
         cache: options?.force ? 'no-store' : 'default'
       });
-
-      clearTimeout(timer);
-      if (options?.signal) {
-        options.signal.removeEventListener('abort', abortHandler);
-      }
 
       if (res.ok) {
         let html = await res.text();
