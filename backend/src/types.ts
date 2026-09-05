@@ -117,6 +117,11 @@ export interface AlertDeliveryResult {
   telegramSuccess: boolean;
   apnsSuccess?: boolean;
   error?: string;
+  webPushProvider?: {
+    called: boolean;
+    statusCode?: number;
+    message?: string;
+  };
   timestamp: number;
 }
 

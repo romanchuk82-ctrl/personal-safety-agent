@@ -36,7 +36,9 @@ app.get('/healthz', (_req: Request, res: Response) => {
     server: 'Personal Safety Backend Engine',
     timestamp: Date.now(),
     monitoringActive: true,
-    lastMonitoringCycle: safetyMonitor.getLastCycleTimestamp()
+    lastMonitoringCycle: safetyMonitor.getLastCycleTimestamp(),
+    registrationPersistence: deviceManager.isPersistenceReady(),
+    registrationStorage: deviceManager.getStorageDescription()
   });
 });
 
@@ -83,7 +85,30 @@ app.post('/api/device/subscribe-push', (req: Request, res: Response) => {
     message: 'Web Push subscription registered successfully',
     hasWebPush: !!session.webPushSubscription,
     locationHealth: session.locationHealth,
-    hasLocation: !!session.lastLocation
+    hasLocation: !!session.lastLocation,
+    deviceId: session.deviceId,
+    endpointAcknowledged: session.webPushSubscription?.endpoint === subscription.endpoint,
+    persisted: deviceManager.isPersistenceReady()
+  });
+});
+
+/** Verify that this exact browser subscription is durably registered. */
+app.get('/api/device/push-status', (req: Request, res: Response) => {
+  const deviceId = String(req.query.deviceId || '');
+  const endpoint = String(req.query.endpoint || '');
+  if (!deviceId || !endpoint) {
+    return res.status(400).json({ error: 'deviceId and endpoint query params are required' });
+  }
+  const session = deviceManager.getDevice(deviceId);
+  const subscriptionFound = !!session?.webPushSubscription;
+  const endpointMatches = subscriptionFound && session!.webPushSubscription!.endpoint === endpoint;
+  res.json({
+    registered: !!session && endpointMatches && deviceManager.isPersistenceReady(),
+    deviceId,
+    sessionFound: !!session,
+    subscriptionFound,
+    endpointMatches,
+    persisted: deviceManager.isPersistenceReady()
   });
 });
 
@@ -233,22 +258,22 @@ app.post('/api/alerts/test-push', async (req: Request, res: Response) => {
 
   const session = deviceManager.getDevice(deviceId);
   if (!session) {
+    console.log(`[TestPush] deviceId=${deviceId} sessionFound=NO subscriptionFound=NO endpointPresent=NO sendNotificationCalled=NO providerStatus=NOT_CALLED error=DEVICE_NOT_FOUND`);
     return res.status(404).json({ error: 'Device session not found. Please activate Web Push first.' });
   }
 
   if (!session.webPushSubscription) {
+    console.log(`[TestPush] deviceId=${deviceId} sessionFound=YES subscriptionFound=NO endpointPresent=NO sendNotificationCalled=NO providerStatus=NOT_CALLED error=SUBSCRIPTION_NOT_FOUND`);
     return res.status(400).json({ error: 'Web Push subscription not found on server for this device.' });
   }
 
-  const delaySeconds = Math.max(0, Math.min(60, Number(delaySec) || 15));
+  const parsedDelay = delaySec === undefined ? 15 : Number(delaySec);
+  const delaySeconds = Math.max(0, Math.min(60, Number.isFinite(parsedDelay) ? parsedDelay : 15));
   const delayMs = delaySeconds * 1000;
 
-  console.log(`[Server] Scheduling TEST Web Push for ${deviceId} in ${delaySeconds}s (lock screen test)...`);
-
-  setTimeout(async () => {
-    try {
-      console.log(`[Server] Dispatching TEST Web Push to ${deviceId}...`);
-      const assessment: AlertAssessment = {
+  console.log(`[TestPush] deviceId=${deviceId} sessionFound=YES subscriptionFound=YES endpointPresent=${session.webPushSubscription.endpoint ? 'YES' : 'NO'} sendNotificationCalled=NO`);
+  await new Promise(resolve => setTimeout(resolve, delayMs));
+  const assessment: AlertAssessment = {
         threatId: `test-lock-${Date.now()}`,
         category: 'UAV_STRIKE',
         distanceKm: 5.0,
@@ -258,26 +283,24 @@ app.post('/api/alerts/test-push', async (req: Request, res: Response) => {
         alertTitle: '🚨 TEST — PERSONAL SAFETY AGENT',
         alertBody: 'Увага! Тестове попередження про небезпеку.',
         timestamp: Date.now()
-      };
-
-      const result = await alertDeliveryService.deliverAlert(session, assessment, {
-        isTest: true,
-        force: true
-      });
-      console.log(`[Server] Test alert delivery complete: webPush=${result.webPushSuccess}, telegram=${result.telegramSuccess}`);
-    } catch (e: any) {
-      console.error('[Server] Delayed Web Push error:', e?.message || e);
-    }
-  }, delayMs);
-
+  };
+  const result = await alertDeliveryService.deliverAlert(session, assessment, { isTest: true, force: true });
+  console.log(`[TestPush] deviceId=${deviceId} sessionFound=YES subscriptionFound=YES endpointPresent=YES sendNotificationCalled=${result.webPushProvider?.called ? 'YES' : 'NO'} providerStatus=${result.webPushProvider?.statusCode ?? 'ERROR'} error=${result.error ?? 'NONE'}`);
+  if (!result.webPushSuccess) {
+    return res.status(502).json({
+      success: false,
+      error: result.error || 'Web Push provider rejected the notification',
+      diagnostics: result.webPushProvider
+    });
+  }
   res.json({
     success: true,
-    scheduled: true,
+    sent: true,
     delaySec: delaySeconds,
-    message: 'Тест надіслано. Заблокуйте iPhone.',
+    message: 'Web Push accepted by provider.',
     deviceId: session.deviceId,
     hasWebPush: !!session.webPushSubscription,
-    hasTelegram: !!session.telegramChatId
+    provider: result.webPushProvider
   });
 });
 

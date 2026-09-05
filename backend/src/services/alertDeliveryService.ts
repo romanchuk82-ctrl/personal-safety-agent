@@ -25,7 +25,7 @@ export class AlertDeliveryService {
     title: string,
     body: string,
     data: Record<string, any> = {}
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; called: boolean; statusCode?: number; message?: string }> {
     try {
       const payload = JSON.stringify({
         notification: {
@@ -44,7 +44,7 @@ export class AlertDeliveryService {
         }
       });
 
-      await webpush.sendNotification(
+      const providerResult = await webpush.sendNotification(
         {
           endpoint: subscription.endpoint,
           keys: {
@@ -59,10 +59,13 @@ export class AlertDeliveryService {
         }
       );
 
-      return true;
+      console.log(`[WebPush] sendNotification called=YES providerStatus=${providerResult.statusCode}`);
+      return { success: true, called: true, statusCode: providerResult.statusCode, message: providerResult.body || 'Accepted by push provider' };
     } catch (err: any) {
-      console.error('[AlertDeliveryService] Web Push delivery error:', err?.message || err);
-      return false;
+      const statusCode = err?.statusCode;
+      const message = err?.body || err?.message || String(err);
+      console.error(`[WebPush] sendNotification called=YES providerStatus=${statusCode ?? 'ERROR'} error=${message}`);
+      return { success: false, called: true, statusCode, message };
     }
   }
 
@@ -120,6 +123,7 @@ export class AlertDeliveryService {
     }
 
     let webPushSuccess = false;
+    let webPushProvider: AlertDeliveryResult['webPushProvider'] = { called: false };
     let telegramSuccess = false;
 
     let title = assessment.alertTitle;
@@ -135,7 +139,7 @@ export class AlertDeliveryService {
 
     // 1. Web Push Channel
     if (session.webPushSubscription) {
-      webPushSuccess = await this.sendWebPush(
+      const pushResult = await this.sendWebPush(
         session.webPushSubscription,
         title,
         body,
@@ -146,6 +150,12 @@ export class AlertDeliveryService {
           isTest: options.isTest
         }
       );
+      webPushSuccess = pushResult.success;
+      webPushProvider = {
+        called: pushResult.called,
+        statusCode: pushResult.statusCode,
+        message: pushResult.message
+      };
     }
 
     // 2. Telegram Bot Channel
@@ -161,6 +171,8 @@ export class AlertDeliveryService {
     return {
       webPushSuccess,
       telegramSuccess,
+      webPushProvider,
+      error: webPushSuccess || !session.webPushSubscription ? undefined : webPushProvider.message,
       timestamp: now
     };
   }

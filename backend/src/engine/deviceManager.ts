@@ -7,13 +7,16 @@ import { haversineDistanceKm } from './threatDistance.js';
 export class DeviceManager {
   private devices: Map<string, DeviceSession> = new Map();
   private storageFile: string | null = null;
+  private persistenceReady = false;
 
   constructor(customStorageFile?: string) {
     if (customStorageFile) {
       this.storageFile = customStorageFile;
       this.loadFromDisk();
     } else if (process.env.NODE_ENV !== 'test') {
-      this.storageFile = path.resolve(process.cwd(), 'data', 'devices.json');
+      this.storageFile = process.env.DEVICE_STORAGE_FILE
+        ? path.resolve(process.env.DEVICE_STORAGE_FILE)
+        : path.resolve(process.cwd(), 'data', 'devices.json');
       this.loadFromDisk();
     }
   }
@@ -30,11 +33,16 @@ export class DeviceManager {
               this.devices.set(s.deviceId, s);
             }
           }
-          console.log(`[DeviceManager] Loaded ${this.devices.size} devices from disk.`);
+          console.log(`[DeviceManager] Loaded ${this.devices.size} devices from persistent storage.`);
         }
       }
+      const dir = path.dirname(this.storageFile);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      this.persistenceReady = true;
     } catch (e) {
-      console.warn('[DeviceManager] Failed to load devices from disk:', e);
+      this.persistenceReady = false;
+      console.error('[DeviceManager] Persistent storage is unavailable:', e);
     }
   }
 
@@ -46,10 +54,23 @@ export class DeviceManager {
         fs.mkdirSync(dir, { recursive: true });
       }
       const data = Array.from(this.devices.values());
-      fs.writeFileSync(this.storageFile, JSON.stringify(data, null, 2), 'utf8');
+      const tempFile = `${this.storageFile}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
+      fs.renameSync(tempFile, this.storageFile);
+      this.persistenceReady = true;
     } catch (e) {
-      console.warn('[DeviceManager] Failed to save devices to disk:', e);
+      this.persistenceReady = false;
+      console.error('[DeviceManager] Failed to persist devices:', e);
+      throw new Error('Device registration could not be persisted');
     }
+  }
+
+  public isPersistenceReady(): boolean {
+    return this.storageFile === null || this.persistenceReady;
+  }
+
+  public getStorageDescription(): string {
+    return this.storageFile ? 'file' : 'memory-test';
   }
 
   /**

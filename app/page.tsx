@@ -182,6 +182,7 @@ export default function HomePage() {
   // $0 Notification Channels (Web Push + Telegram Bot)
   const [telegramChatId, setTelegramChatId] = useState<string>('');
   const [isWebPushSubscribed, setIsWebPushSubscribed] = useState<boolean>(false);
+  const [webPushNeedsSync, setWebPushNeedsSync] = useState<boolean>(false);
   const [isSubscribingPush, setIsSubscribingPush] = useState<boolean>(false);
   const [isPwaStandalone, setIsPwaStandalone] = useState<boolean>(false);
   const [isIosBrowser, setIsIosBrowser] = useState<boolean>(false);
@@ -431,11 +432,19 @@ export default function HomePage() {
         .then((reg) => {
           console.log('ServiceWorker ready:', reg.scope);
           if ('Notification' in window && Notification.permission === 'granted') {
-            reg.pushManager.getSubscription().then((sub) => {
-              if (sub) {
-                setIsWebPushSubscribed(true);
+            reg.pushManager.getSubscription().then(async (sub) => {
+              if (!sub) {
+                setIsWebPushSubscribed(false);
+                setWebPushNeedsSync(false);
+                return;
               }
-            }).catch(() => {});
+              setWebPushNeedsSync(true);
+              await synchronizeWebPushRegistration(sub);
+            }).catch((error) => {
+              console.error('[WebPushSync] launch sync failed', error);
+              setIsWebPushSubscribed(false);
+              setWebPushNeedsSync(true);
+            });
           }
 
           navigator.serviceWorker.addEventListener('message', (event) => {
@@ -589,6 +598,58 @@ export default function HomePage() {
     return `${DEFAULT_BACKEND_URL}${endpointPath}`;
   };
 
+  const serializePushSubscription = (sub: PushSubscription) => {
+    const json = sub.toJSON();
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      throw new Error('Push API повернув неповні ключі підписки');
+    }
+    return {
+      endpoint: json.endpoint,
+      keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }
+    };
+  };
+
+  const synchronizeWebPushRegistration = async (sub: PushSubscription): Promise<boolean> => {
+    const subscription = serializePushSubscription(sub);
+    const deviceId = getOrCreateDeviceId();
+    const statusUrl = getBackendEndpoint('/api/device/push-status') +
+      `?deviceId=${encodeURIComponent(deviceId)}&endpoint=${encodeURIComponent(subscription.endpoint)}`;
+
+    try {
+      const statusResponse = await fetch(statusUrl, { cache: 'no-store' });
+      const status = statusResponse.ok ? await statusResponse.json() : null;
+      if (status?.registered && status?.persisted && status?.endpointMatches) {
+        setIsWebPushSubscribed(true);
+        setWebPushNeedsSync(false);
+        localStorage.setItem('psa_web_push_subscribed', 'true');
+        return true;
+      }
+
+      setIsWebPushSubscribed(false);
+      setWebPushNeedsSync(true);
+      const registerResponse = await fetch(getBackendEndpoint('/api/device/subscribe-push'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId, subscription })
+      });
+      const ack = await registerResponse.json().catch(() => ({}));
+      if (!registerResponse.ok || !ack.success || !ack.persisted || !ack.endpointAcknowledged || ack.deviceId !== deviceId) {
+        throw new Error(ack.error || `Backend registration ACK failed (HTTP ${registerResponse.status})`);
+      }
+      setIsWebPushSubscribed(true);
+      setWebPushNeedsSync(false);
+      localStorage.setItem('psa_web_push_subscribed', 'true');
+      console.log(`[WebPushSync] deviceId=${deviceId} browserSubscription=YES backendAck=YES persisted=YES`);
+      return true;
+    } catch (error) {
+      console.error(`[WebPushSync] deviceId=${deviceId} browserSubscription=YES backendAck=NO`, error);
+      setIsWebPushSubscribed(false);
+      setWebPushNeedsSync(true);
+      localStorage.removeItem('psa_web_push_subscribed');
+      return false;
+    }
+  };
+
   const handleSubscribeWebPush = async () => {
     if (typeof window === 'undefined') return;
     setIsSubscribingPush(true);
@@ -625,59 +686,12 @@ export default function HomePage() {
         });
       }
 
-      const subJson = sub.toJSON();
-      if (!subJson.endpoint || !subJson.keys?.p256dh || !subJson.keys?.auth) {
-        throw new Error('Push API повернув неповні ключі підписки');
-      }
-
-      const deviceId = getOrCreateDeviceId();
       setNativeTestAlertNotice('⏳ Збереження підписки на захисному сервері...');
-
-      const targetLocation = trustedLocation ? {
-        deviceId,
-        latitude: trustedLocation.lat,
-        longitude: trustedLocation.lng,
-        name: trustedLocation.name,
-        oblast: trustedLocation.oblast,
-        lockMode: activeLocationPreset
-      } : {
-        deviceId,
-        latitude: 50.4501,
-        longitude: 30.5234,
-        name: 'Київ (Центр)',
-        oblast: 'м. Київ',
-        lockMode: 'HOME'
-      };
-
-      const endpoint = getBackendEndpoint('/api/device/subscribe-push');
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId,
-          subscription: {
-            endpoint: subJson.endpoint,
-            keys: {
-              p256dh: subJson.keys?.p256dh,
-              auth: subJson.keys?.auth
-            }
-          },
-          location: targetLocation
-        })
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => '');
-        throw new Error(`Сервер повернув HTTP ${res.status}: ${errorText}`);
-      }
-
-      const data = await res.json();
-      if (data.success) {
-        setIsWebPushSubscribed(true);
-        localStorage.setItem('psa_web_push_subscribed', 'true');
+      const synchronized = await synchronizeWebPushRegistration(sub);
+      if (synchronized) {
         setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE ($0 VAPID)');
       } else {
-        throw new Error(data.error || 'Помилка збереження на сервері');
+        throw new Error('Backend не підтвердив збереження підписки');
       }
     } catch (e: any) {
       console.error('[WebPush]', e);
@@ -700,7 +714,25 @@ export default function HomePage() {
 
     try {
       const deviceId = getOrCreateDeviceId();
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription || !(await synchronizeWebPushRegistration(subscription))) {
+        throw new Error('WEB PUSH NEEDS SYNC: backend registration was not confirmed');
+      }
       const testUrl = getBackendEndpoint('/api/alerts/test-push');
+
+      setLockScreenTestStatus('WAITING');
+      setLockScreenCountdown(15);
+      setNativeTestAlertNotice('Заблокуйте iPhone — Web Push буде надіслано через 15с.');
+      const timer = window.setInterval(() => {
+        setLockScreenCountdown(prev => {
+          if (prev <= 1) {
+            window.clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
 
       const res = await fetch(testUrl, {
         method: 'POST',
@@ -716,19 +748,11 @@ export default function HomePage() {
         throw new Error(errJson.error || `Помилка сервера HTTP ${res.status}`);
       }
 
-      setLockScreenTestStatus('WAITING');
-      setLockScreenCountdown(15);
-      setNativeTestAlertNotice('«Тест надіслано. Заблокуйте iPhone.» (15с)');
-
-      const timer = setInterval(() => {
-        setLockScreenCountdown(prev => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      const result = await res.json();
+      if (!result.success || !result.sent || !result.provider?.called) {
+        throw new Error('Push provider did not accept the notification');
+      }
+      setNativeTestAlertNotice(`✓ Push provider прийняв сповіщення (HTTP ${result.provider.statusCode})`);
     } catch (err: any) {
       console.error('[TestPush]', err);
       setNativeTestAlertNotice(`❌ Помилка: ${err.message || err}`);
@@ -2183,12 +2207,14 @@ export default function HomePage() {
               <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
                 isIosBrowser && !isPwaStandalone
                   ? 'bg-slate-900 text-slate-400 border-slate-700'
-                  : !isWebPushSubscribed
+                  : webPushNeedsSync || !isWebPushSubscribed
                   ? 'bg-amber-950/80 text-amber-300 border-amber-800'
                   : 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
               )}>
                 {isIosBrowser && !isPwaStandalone ? (
                   '⚪ ПОТРІБНО ВСТАНОВИТИ НА IPHONE'
+                ) : webPushNeedsSync ? (
+                  '🟡 WEB PUSH NEEDS SYNC'
                 ) : !isWebPushSubscribed ? (
                   '🟡 СПОВІЩЕННЯ НЕ АКТИВОВАНІ'
                 ) : (
