@@ -372,7 +372,7 @@ export default function HomePage() {
       startedAt?: number;
     }
   ) => {
-    if (isChecking) return;
+    if (isChecking && !options?.force) return;
     setIsChecking(true);
     const checkStartTime = options?.startedAt || Date.now();
 
@@ -390,6 +390,10 @@ export default function HomePage() {
         })
       ]);
 
+      const effectiveCycleTs = (tgRes.metrics && tgRes.metrics.healthyCount > 0)
+        ? Date.now()
+        : (lastSuccessfulIngestTsRef.current || Date.now());
+
       const result = evaluateLocalSecurity(
         currentLoc.lat,
         currentLoc.lng,
@@ -397,7 +401,7 @@ export default function HomePage() {
         'Кирил',
         alertsRes.alerts,
         tgRes.messages,
-        lastRealDataTsRef.current,
+        effectiveCycleTs,
         alertsRes.status,
         tgRes.metrics
       );
@@ -501,7 +505,7 @@ export default function HomePage() {
   }, [radiusKm, isChecking, speakAlert, customChannels, audioEnabled]);
 
   const handleManualDataRefresh = useCallback(async () => {
-    if (isManualRefreshing || isChecking) return;
+    if (isManualRefreshing) return;
     const targetLoc = trustedLocation || locationValidatorRef.current.getTrustedLocation();
     if (!targetLoc) return;
 
@@ -550,7 +554,7 @@ export default function HomePage() {
       clearTimeout(hardTimeoutTimer);
       setIsManualRefreshing(false);
     }
-  }, [isManualRefreshing, isChecking, trustedLocation, performSecurityCheck]);
+  }, [isManualRefreshing, trustedLocation, performSecurityCheck]);
 
   // Continuous background GPS feed to Location Confidence Layer
   const startContinuousGpsWatch = useCallback(() => {
@@ -616,7 +620,7 @@ export default function HomePage() {
         if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
         checkIntervalRef.current = setInterval(() => {
           performSecurityCheck(trustedLocation);
-        }, 25000);
+        }, 5000);
         return;
       }
 
@@ -645,7 +649,7 @@ export default function HomePage() {
             if (locationValidatorRef.current.getTrustedLocation()) {
               performSecurityCheck(locationValidatorRef.current.getTrustedLocation()!);
             }
-          }, 25000);
+          }, 5000);
 
           // Start continuous GPS watch in background
           startContinuousGpsWatch();
@@ -670,7 +674,7 @@ export default function HomePage() {
           if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
           checkIntervalRef.current = setInterval(() => {
             performSecurityCheck(fallbackLoc);
-          }, 25000);
+          }, 5000);
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -741,7 +745,7 @@ export default function HomePage() {
       if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
       checkIntervalRef.current = setInterval(() => {
         performSecurityCheck(manualLoc);
-      }, 25000);
+      }, 5000);
     }
   };
 
@@ -901,7 +905,7 @@ export default function HomePage() {
   const state = evaluation?.overallState || (isActive ? 'GREEN' : 'GREEN');
   const isRed = state === 'RED';
   const isOrange = state === 'ORANGE';
-  const isDegraded = state === 'DEGRADED' || secondsSinceRealData > 90 || secondsSinceCheck > 90;
+  const isDegraded = state === 'DEGRADED' || secondsSinceCheck > 90 || evaluation?.monitoringHealth === 'INCOMPLETE';
   const isGreen = !isRed && !isOrange && !isDegraded && isActive && (evaluation?.monitoringHealth === 'OK' || evaluation?.monitoringHealth === 'DEGRADED');
 
   const formattedDataFreshness = secondsSinceRealData <= 1
