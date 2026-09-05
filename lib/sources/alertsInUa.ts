@@ -52,6 +52,7 @@ export let lastAlertsFetchDiagnostic: AlertsDiagnostic = {
 let lastSuccessfulAlertsFetchIso: string = '';
 let lastSuccessfulAlertsFetchTs: number = 0;
 let lastAlertsSourceUpdatedIso: string = '';
+let lastKnownSuccessfulAlerts: RawAlert[] = [];
 
 type FetchResult = {
   alerts: RawAlert[];
@@ -131,6 +132,7 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
       const receivedAt = Date.now();
       lastSuccessfulAlertsFetchIso = new Date(receivedAt).toISOString();
       lastSuccessfulAlertsFetchTs = receivedAt;
+      lastKnownSuccessfulAlerts = alerts;
       if (sourceUpdatedIso) {
         lastAlertsSourceUpdatedIso = sourceUpdatedIso;
       }
@@ -167,7 +169,7 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
   const diagnostic: AlertsDiagnostic = {
     sourceOnline: false,
     status: 'ERROR',
-    activeAlertsCount: 0,
+    activeAlertsCount: getActiveAirRaidAlerts(lastKnownSuccessfulAlerts).length,
     sourceUpdatedIso: lastAlertsSourceUpdatedIso || '',
     receivedByAgentIso: new Date(requestedAt).toISOString(),
     lastSuccessfulFetchIso: lastSuccessfulAlertsFetchIso || undefined,
@@ -179,10 +181,10 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
   };
   lastAlertsFetchDiagnostic = diagnostic;
   return {
-    alerts: [],
+    alerts: lastKnownSuccessfulAlerts,
     status: 'ERROR',
     diagnostic,
-    message: 'Official alerts source is unavailable; stale polygons were cleared.'
+    message: 'Official alerts source is temporarily unavailable; retaining last confirmed state with stale warning.'
   };
 }
 
@@ -255,4 +257,5 @@ export function __resetAlertsFetchStateForTests(): void {
   lastSuccessfulAlertsFetchIso = '';
   lastSuccessfulAlertsFetchTs = 0;
   lastAlertsSourceUpdatedIso = '';
+  lastKnownSuccessfulAlerts = [];
 }

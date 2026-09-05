@@ -133,42 +133,19 @@ export default function HomePage() {
   const lastTelegramCycleTsRef = useRef<number>(0);
   const lastTelegramMessageTsRef = useRef<number>(0);
   const lastOfficialFetchTsRef = useRef<number>(0);
-
-  // Initial and background high-frequency fetch of official alerts (7.5s loop for real-time accuracy within alerts.in.ua limits)
-  useEffect(() => {
-    let isMounted = true;
-    const loadAlerts = async () => {
-      try {
-        const res = await fetchActiveAlerts();
-        if (isMounted) {
-          setOfficialAlerts(res.status === 'OK' && !res.diagnostic.isStale ? res.alerts : []);
-          setAlertsDiagnostic({ ...res.diagnostic });
-          if (res.status === 'OK' && res.diagnostic.sourceOnline) {
-            const fetchTs = res.diagnostic.lastSuccessfulFetchTs || Date.now();
-            lastOfficialFetchTsRef.current = fetchTs;
-            setLastOfficialFetchTime(new Date(fetchTs));
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load official alerts:', err);
-      }
-    };
-
-    loadAlerts();
-    const interval = setInterval(loadAlerts, 7500);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
+  const currentRequestIdRef = useRef<number>(0);
+  const lastCommittedRequestIdRef = useRef<number>(0);
 
   const handleOfficialAlertsRefresh = useCallback(async () => {
     if (isRefreshingOfficial) return;
     setIsRefreshingOfficial(true);
     try {
       const res = await fetchActiveAlerts(undefined, { force: true });
-      setOfficialAlerts(res.status === 'OK' && !res.diagnostic.isStale ? res.alerts : []);
+      if (res.status === 'OK' && !res.diagnostic.isStale) {
+        setOfficialAlerts(res.alerts);
+      } else if (res.alerts && res.alerts.length > 0) {
+        setOfficialAlerts(res.alerts);
+      }
       setAlertsDiagnostic({ ...res.diagnostic });
       if (res.status === 'OK' && res.diagnostic.sourceOnline) {
         const fetchTs = res.diagnostic.lastSuccessfulFetchTs || Date.now();
@@ -397,6 +374,7 @@ export default function HomePage() {
   ) => {
     if (isChecking && !options?.force) return;
     setIsChecking(true);
+    const requestId = ++currentRequestIdRef.current;
     const checkStartTime = options?.startedAt || Date.now();
 
     try {
@@ -412,6 +390,13 @@ export default function HomePage() {
           timeoutMs: options?.force ? 3000 : 4500
         })
       ]);
+
+      // Guard against out-of-order responses overwriting newer state
+      if (requestId < lastCommittedRequestIdRef.current) {
+        console.warn(`[PSA] Skipping out-of-order response (req #${requestId} < #${lastCommittedRequestIdRef.current})`);
+        return;
+      }
+      lastCommittedRequestIdRef.current = requestId;
 
       const effectiveCycleTs = (tgRes.metrics && tgRes.metrics.healthyCount > 0)
         ? Date.now()
@@ -437,7 +422,16 @@ export default function HomePage() {
       }
 
       setEvaluation(result);
-      setOfficialAlerts(alertsRes.status === 'OK' && !alertsRes.diagnostic.isStale ? alertsRes.alerts : []);
+
+      // SAFE OFFICIAL ALERTS RETENTION:
+      // When source succeeds, commit fresh alert zones.
+      // When source has transient error, NEVER erase existing active alerts (do not false CLEAR).
+      if (alertsRes.status === 'OK' && !alertsRes.diagnostic.isStale) {
+        setOfficialAlerts(alertsRes.alerts);
+      } else if (alertsRes.alerts && alertsRes.alerts.length > 0) {
+        setOfficialAlerts(alertsRes.alerts);
+      }
+
       setAlertsDiagnostic({ ...alertsRes.diagnostic });
       setLastCheckTime(new Date());
       setSecondsSinceCheck(0);
@@ -1237,7 +1231,7 @@ export default function HomePage() {
                 </div>
                 <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex flex-col justify-between">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400 block font-mono">⏱️ ОНОВЛЕННЯ ДАНИХ</span>
+                    <span className="text-[10px] text-slate-400 block font-mono">⏱️ ПЕРЕВІРКА ДАНИХ</span>
                     <button
                       type="button"
                       onClick={handleManualDataRefresh}
@@ -1248,11 +1242,13 @@ export default function HomePage() {
                       <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
                     </button>
                   </div>
-                  <div className="flex items-baseline justify-between mt-1">
-                    <span className={'font-mono font-bold text-xs truncate ' + (isManualRefreshing ? 'text-cyan-300 animate-pulse' : isDegraded ? 'text-amber-400' : 'text-white')}>
-                      {isManualRefreshing ? '↻ Оновлюю...' : formattedDataFreshness}
+                  <div className="mt-1">
+                    <span className={'font-mono font-bold text-xs truncate block ' + (isManualRefreshing ? 'text-cyan-300 animate-pulse' : secondsSinceCheck > 90 ? 'text-amber-400' : 'text-white')}>
+                      {isManualRefreshing ? '↻ Оновлюю...' : secondsSinceCheck <= 10 ? 'Перевірено щойно' : `Перевірено ${formatAgeWithStaleWarningUk(secondsSinceCheck, 90).text}`}
                     </span>
-                    <span className="text-[10px] text-emerald-400 font-mono shrink-0">{monitoredSourcesCount} джерел</span>
+                    <span className="text-[10px] text-slate-400 font-mono block truncate mt-0.5">
+                      {lastRealDataTsRef.current > 0 ? `Дані джерел: ${formatAgeWithStaleWarningUk(secondsSinceRealData, 1800).text}` : `${monitoredSourcesCount} джерел онлайн`}
+                    </span>
                   </div>
                 </div>
                 <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
