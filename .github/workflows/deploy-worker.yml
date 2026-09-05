@@ -1,6 +1,10 @@
 name: Deploy Cloudflare Worker Backend
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +22,7 @@ jobs:
 
       - name: Install Worker Dependencies
         working-directory: worker
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
