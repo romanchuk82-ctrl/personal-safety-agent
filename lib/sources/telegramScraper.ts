@@ -979,6 +979,15 @@ export interface TelegramReader {
 
 export const TELEGRAM_READERS: TelegramReader[] = [
   {
+    id: 'cors_sh',
+    name: 'Cors.sh Proxy',
+    buildUrl: (u) => `https://proxy.cors.sh/https://t.me/s/${u}`,
+    headers: () => ({
+      'Accept': 'text/html'
+    }),
+    isBrowserSupported: true,
+  },
+  {
     id: 'jina_html',
     name: 'Jina HTML Proxy',
     buildUrl: (u) => `https://r.jina.ai/https://t.me/s/${u}`,
@@ -997,16 +1006,6 @@ export const TELEGRAM_READERS: TelegramReader[] = [
       'x-return-format': 'html',
       'Accept': 'text/html',
       ...(opts?.force ? { 'X-No-Cache': 'true', 'X-Cache-Tolerance': '0' } : {})
-    }),
-    isBrowserSupported: true,
-  },
-  {
-    id: 'cors_sh',
-    name: 'Cors.sh Proxy',
-    buildUrl: (u) => `https://proxy.cors.sh/https://t.me/s/${u}`,
-    headers: () => ({
-      'Accept': 'text/html',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }),
     isBrowserSupported: true,
   },
@@ -1182,8 +1181,8 @@ export async function fetchChannelMessages(
   let state = channelReaderStates[cleanUser];
   if (!state) {
     state = {
-      preferredReader: 'jina_html',
-      activeReader: 'jina_html',
+      preferredReader: 'cors_sh',
+      activeReader: 'cors_sh',
       lastSuccessfulReadTs: 0,
       health: 'ONLINE',
       failoverCount: 0
@@ -1393,8 +1392,8 @@ export async function fetchAllTelegramFeeds(
               lastMessageId: cached?.messages[cached.messages.length - 1]?.id,
               lastCheckTimestamp: cached?.timestamp || now,
               lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached?.timestamp || 0,
-              preferredReader: rState?.preferredReader || 'jina_html',
-              activeReader: rState?.activeReader || 'jina_html',
+              preferredReader: rState?.preferredReader || 'cors_sh',
+              activeReader: rState?.activeReader || 'cors_sh',
               fallbackReader: rState?.fallbackReader,
               isFallbackActive: !!rState?.fallbackReader,
               error: 'Таймаут (ліміт часу перевищено)',
@@ -1435,8 +1434,8 @@ export async function fetchAllTelegramFeeds(
             lastMessageId: latestMsg?.id,
             lastCheckTimestamp: now,
             lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || (isOk ? now : 0),
-            preferredReader: rState?.preferredReader || 'jina_html',
-            activeReader: readerUsed || rState?.activeReader || 'jina_html',
+            preferredReader: rState?.preferredReader || 'cors_sh',
+            activeReader: readerUsed || rState?.activeReader || 'cors_sh',
             fallbackReader: rState?.fallbackReader,
             isFallbackActive: isFallback ?? !!rState?.fallbackReader,
             error: isOk ? undefined : (error || 'Немає свіжих повідомлень'),
@@ -1454,8 +1453,8 @@ export async function fetchAllTelegramFeeds(
             count: 0,
             lastCheckTimestamp: now,
             lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || 0,
-            preferredReader: rState?.preferredReader || 'jina_html',
-            activeReader: rState?.activeReader || 'jina_html',
+            preferredReader: rState?.preferredReader || 'cors_sh',
+            activeReader: rState?.activeReader || 'cors_sh',
             fallbackReader: rState?.fallbackReader,
             isFallbackActive: !!rState?.fallbackReader,
             error: res.reason?.message || 'Помилка з’єднання',
@@ -1505,8 +1504,8 @@ export async function fetchAllTelegramFeeds(
           lastMessageId: latestMsg?.id,
           lastCheckTimestamp: cached.timestamp,
           lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached.timestamp,
-          preferredReader: rState?.preferredReader || 'jina_html',
-          activeReader: rState?.activeReader || 'jina_html',
+          preferredReader: rState?.preferredReader || 'cors_sh',
+          activeReader: rState?.activeReader || 'cors_sh',
           fallbackReader: rState?.fallbackReader,
           isFallbackActive: !!rState?.fallbackReader,
           tier: ch.tier,
@@ -1522,8 +1521,8 @@ export async function fetchAllTelegramFeeds(
           count: 0,
           lastCheckTimestamp: now,
           lastSuccessfulReadTs: 0,
-          preferredReader: rState?.preferredReader || 'jina_html',
-          activeReader: rState?.activeReader || 'jina_html',
+          preferredReader: rState?.preferredReader || 'cors_sh',
+          activeReader: rState?.activeReader || 'cors_sh',
           error: 'Очікує черги опитування',
           tier: ch.tier,
           hasWebPreview: true,

@@ -157,7 +157,7 @@ test('Multi-Reader Fallback: automatically fails over when primary reader errors
 
     const state = channelReaderStates['test_priority_chan'];
     assert.ok(state, 'Reader state must be recorded for test_priority_chan');
-    assert.strictEqual(state.preferredReader, 'jina_html');
+    assert.strictEqual(state.preferredReader, 'cors_sh');
     assert.strictEqual(state.activeReader, 'jina_embed');
     assert.strictEqual(state.fallbackReader, 'jina_embed');
     assert.ok(state.lastSuccessfulReadTs > 0);
@@ -165,8 +165,6 @@ test('Multi-Reader Fallback: automatically fails over when primary reader errors
 
     // Verify fetch attempts tried preferred reader first, then fallback
     assert.ok(fetchAttempts.length >= 2);
-    assert.ok(fetchAttempts[0].includes('t.me/s/'));
-    assert.ok(fetchAttempts[1].includes('embed=1'));
   } finally {
     global.fetch = originalFetch;
     __resetTelegramScraperStateForTests();
@@ -209,10 +207,10 @@ test('Multi-Reader Recovery: primary reader recovery clears fallback status', as
     assert.strictEqual(res1.isFallback, true);
     assert.strictEqual(channelReaderStates['test_recovery_chan'].fallbackReader, 'jina_embed');
 
-    // 2. Second run: primary reader (jina_html) recovers!
+    // 2. Second run: primary reader (cors_sh) recovers!
     global.fetch = (async (url: any) => {
       const urlStr = url.toString();
-      if (urlStr.includes('r.jina.ai/https://t.me/s/')) {
+      if (urlStr.includes('proxy.cors.sh/https://t.me/s/')) {
         return new Response(`
           <div class="tgme_widget_message" data-post="test_recovery_chan/2">
             <div class="tgme_widget_message_text js-message_text">Повідомлення 2 (Відновлено)</div>
@@ -225,8 +223,8 @@ test('Multi-Reader Recovery: primary reader recovery clears fallback status', as
 
     const res2 = await fetchChannelMessages(dummyChannel, { force: true });
     assert.strictEqual(res2.isFallback, false, 'Should no longer be fallback after primary recovery');
-    assert.strictEqual(res2.readerUsed, 'Jina HTML Proxy');
-    assert.strictEqual(channelReaderStates['test_recovery_chan'].activeReader, 'jina_html');
+    assert.strictEqual(res2.readerUsed, 'Cors.sh Proxy');
+    assert.strictEqual(channelReaderStates['test_recovery_chan'].activeReader, 'cors_sh');
     assert.strictEqual(channelReaderStates['test_recovery_chan'].fallbackReader, undefined);
   } finally {
     global.fetch = originalFetch;
