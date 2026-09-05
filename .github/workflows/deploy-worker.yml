@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Worker Dependencies
         working-directory: worker
@@ -32,18 +32,36 @@ jobs:
         run: |
           node -e "
             async function diag() {
-              const token = process.env.CLOUDFLARE_API_TOKEN;
-              const acc = process.env.CLOUDFLARE_ACCOUNT_ID;
-              console.log('--- CF TOKEN VERIFY ---');
+              const rawToken = process.env.CLOUDFLARE_API_TOKEN || '';
+              const token = rawToken.trim().replace(/^Bearer\s+/i, '');
+              const acc = (process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+              console.log('Token length:', token.length, 'acc:', acc);
+
+              console.log('--- 1. Bearer Token Verify (trimmed) ---');
               try {
-                const r1 = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers: { Authorization: 'Bearer ' + token } });
+                const r1 = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+                  headers: { 'Authorization': 'Bearer ' + token }
+                });
                 console.log(await r1.text());
               } catch (e) { console.error(e); }
 
-              console.log('--- CF SUBDOMAIN ---');
+              console.log('--- 2. Global Key Test with romanchuk82@gmail.com ---');
               try {
-                const r2 = await fetch('https://api.cloudflare.com/client/v4/accounts/' + acc + '/workers/subdomain', { headers: { Authorization: 'Bearer ' + token } });
+                const r2 = await fetch('https://api.cloudflare.com/client/v4/user', {
+                  headers: {
+                    'X-Auth-Key': token,
+                    'X-Auth-Email': 'romanchuk82@gmail.com'
+                  }
+                });
                 console.log(await r2.text());
+              } catch (e) { console.error(e); }
+
+              console.log('--- 3. Direct KV test with trimmed token ---');
+              try {
+                const r3 = await fetch('https://api.cloudflare.com/client/v4/accounts/' + acc + '/storage/kv/namespaces/8d7944ad493e4455b7bd517a5784417f/keys', {
+                  headers: { 'Authorization': 'Bearer ' + token }
+                });
+                console.log(await r3.text());
               } catch (e) { console.error(e); }
 
               console.log('--- CF WORKERS SCRIPTS ---');
