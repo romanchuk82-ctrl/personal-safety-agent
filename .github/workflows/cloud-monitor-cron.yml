@@ -23,9 +23,10 @@ jobs:
               for (let i = 1; i <= 5; i++) {
                 console.log('Triggering cloud cycle ' + i + ' at ' + new Date().toISOString());
                 const res = await fetch('https://personal-safety-backend.lydian-steed.workers.dev/api/monitoring/cycle', {
+                  method: 'POST',
                   headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                    'Accept': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
                   }
                 });
                 console.log('Response status:', res.status);
