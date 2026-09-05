@@ -4,9 +4,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ThreatEvent } from '@/lib/matcher';
 import { RawAlert, getActiveAirRaidAlerts } from '@/lib/sources/alertsInUa';
 import {
-  buildOfficialAlertsSvgOverlay,
+  buildOfficialAlertsGeoJson,
   EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC,
-  OFFICIAL_ALERTS_OVERLAY_BOUNDS,
   OfficialAlertGeometryDiagnostic
 } from '@/lib/officialAlertGeometry';
 import {
@@ -291,14 +290,22 @@ export default function SafetyMap({
       return;
     }
 
-    void buildOfficialAlertsSvgOverlay(activeAlerts).then(({ svg, diagnostic }) => {
+    void buildOfficialAlertsGeoJson(activeAlerts).then(({ geoJson, diagnostic }) => {
       if (cancelled || !mapInstanceRef.current) return;
       onOfficialGeometryDiagnostic?.(diagnostic);
-      if (svg) {
-        const overlay = L.svgOverlay(svg, OFFICIAL_ALERTS_OVERLAY_BOUNDS, {
+      if (geoJson && geoJson.features && geoJson.features.length > 0) {
+        const overlay = L.geoJSON(geoJson, {
           pane: 'officialAlertsPane',
           interactive: false,
-          opacity: 1
+          style: () => ({
+            fillColor: '#dc2626',
+            fillOpacity: 0.22,
+            color: '#ef4444',
+            weight: 1.5,
+            opacity: 0.75,
+            lineJoin: 'round',
+            dashArray: '3, 4'
+          })
         });
         overlay.addTo(map);
         officialAlertsLayerRef.current = overlay;

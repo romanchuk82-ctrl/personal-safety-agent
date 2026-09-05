@@ -4,7 +4,11 @@ import { classifyThreat, getThreatTtlMinutes } from '../lib/threatClassifier';
 import { evaluateLocalSecurity } from '../lib/matcher';
 import { isUserInOfficialAlert, RawAlert, getActiveAirRaidAlerts } from '../lib/sources/alertsInUa';
 import { UKRAINE_REGIONS_GEOJSON } from '../lib/ukraineRegions';
-import { getOfficialGeometryDescriptor, officialLocationTypeLabel } from '../lib/officialAlertGeometry';
+import {
+  getOfficialGeometryDescriptor,
+  officialLocationTypeLabel,
+  buildOfficialAlertsGeoJson
+} from '../lib/officialAlertGeometry';
 
 describe('ЗАДАЧА 1 — Життєвий цикл та TTL рухомих цілей', () => {
   it('Диференційовані operational TTL: короткі для рухомих цілей (5-8 хв)', () => {
@@ -298,5 +302,93 @@ describe('ЗАДАЧА 2 — Шар офіційних тривог та badge',
     assert.deepEqual(getOfficialGeometryDescriptor(make('city', '5351', 'м. Нікополь'))?.geometryKey, 'hromada:351');
     assert.equal(getOfficialGeometryDescriptor(make('unknown', '9', 'Невідомо')), null);
     assert.equal(officialLocationTypeLabel('hromada'), 'громада');
+  });
+
+  it('buildOfficialAlertsGeoJson формує точні WGS84 полігони для Києва, Бориспільського, Броварського та Обухівського районів', async () => {
+    const alerts: RawAlert[] = [
+      {
+        id: 301,
+        location_title: 'м. Київ',
+        location_type: 'oblast',
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        updated_at: new Date().toISOString(),
+        alert_type: 'air_raid',
+        location_oblast: 'м. Київ',
+        location_uid: '31'
+      },
+      {
+        id: 302,
+        location_title: 'Бориспільський район',
+        location_type: 'raion',
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        updated_at: new Date().toISOString(),
+        alert_type: 'air_raid',
+        location_oblast: 'Київська область',
+        location_uid: '78'
+      },
+      {
+        id: 303,
+        location_title: 'Броварський район',
+        location_type: 'raion',
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        updated_at: new Date().toISOString(),
+        alert_type: 'air_raid',
+        location_oblast: 'Київська область',
+        location_uid: '79'
+      },
+      {
+        id: 304,
+        location_title: 'Обухівський район',
+        location_type: 'raion',
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        updated_at: new Date().toISOString(),
+        alert_type: 'air_raid',
+        location_oblast: 'Київська область',
+        location_uid: '76'
+      }
+    ];
+
+    const { geoJson, diagnostic } = await buildOfficialAlertsGeoJson(alerts);
+
+    assert.ok(geoJson);
+    assert.equal(geoJson.type, 'FeatureCollection');
+    assert.equal(geoJson.features.length, 4);
+    assert.equal(diagnostic.activeZoneCount, 4);
+    assert.equal(diagnostic.matchedGeometryCount, 4);
+    assert.equal(diagnostic.unmatchedGeometryCount, 0);
+    assert.equal(diagnostic.renderedGeometryCount, 4);
+
+    // Перевіряємо, що координати є дійсними географічними [lng, lat] у межах України (22-41°E, 44-53°N)
+    for (const feature of geoJson.features) {
+      assert.ok(feature.geometry);
+      assert.ok(feature.geometry.coordinates);
+      
+      const checkCoords = (arr: any) => {
+        if (typeof arr[0] === 'number') {
+          const [lng, lat] = arr;
+          assert.ok(lng >= 22 && lng <= 41, `Longitude ${lng} is outside Ukraine bounds`);
+          assert.ok(lat >= 44 && lat <= 53, `Latitude ${lat} is outside Ukraine bounds`);
+        } else {
+          arr.forEach(checkCoords);
+        }
+      };
+      checkCoords(feature.geometry.coordinates);
+    }
+
+    // Перевіряємо прив'язку конкретно для Києва (50.2-50.6°N, 30.2-30.8°E)
+    const kyivFeature = geoJson.features.find(f => f.properties.geometryKey === 'oblast:31');
+    assert.ok(kyivFeature);
+    assert.equal(kyivFeature.properties.officialAlert, true);
+    assert.equal(kyivFeature.properties.zoneName, 'м. Київ');
+
+    // Перевіряємо Бориспільський район (78)
+    const boryspilFeature = geoJson.features.find(f => f.properties.geometryKey === 'raion:78');
+    assert.ok(boryspilFeature);
+    assert.equal(boryspilFeature.properties.officialAlert, true);
+    assert.equal(boryspilFeature.properties.zoneName, 'Бориспільський район');
   });
 });
