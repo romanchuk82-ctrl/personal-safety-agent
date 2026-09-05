@@ -1,16 +1,31 @@
 # Personal Safety Agent (Персональний агент локальної безпеки) 🇺🇦
 
-Персональний мобільний веб-сервіс (PWA) для оперативного попередження про локальну небезпеку в Україні з точною прив'язкою до поточної геолокації користувача (~5 км), безкоштовним детермінованим аналізом відкритих радіолокаційних джерел та сповіщеннями на iPhone (Web Push на замкнений екран + синтез голосу / сирена).
+[![iOS Build & Release](https://github.com/romanchuk82-ctrl/personal-safety-agent/actions/workflows/ios-build.yml/badge.svg)](https://github.com/romanchuk82-ctrl/personal-safety-agent/actions/workflows/ios-build.yml)
+[![Deploy to GitHub Pages](https://github.com/romanchuk82-ctrl/personal-safety-agent/actions/workflows/deploy.yml/badge.svg)](https://romanchuk82-ctrl.github.io/personal-safety-agent/)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/romanchuk82-ctrl/personal-safety-agent)
+
+Єдиний нативний комплекс безпеки для iPhone з цілодобовим автономним 24/7 бекендом:
+* **Одна іконка на iPhone** (нативний SwiftUI + WKWebView контейнер).
+* **Штатний фоновий трекінг Core Location** при заблокованому екрані та під час руху авто (`activityType = .automotiveNavigation`).
+* **Кастомний звук тривоги** `danger_alarm.wav` (сирена + наказ диктора *"Attention! Danger nearby!"*).
+* **Пакет Apple Critical Alerts** для пробивання беззвучного режиму.
 
 ---
 
-## 🚀 Головний сценарій
+## 📲 Встановлення на iPhone в 1 клік (.IPA)
 
-1. **Мобільний доступ**: Відкрийте сервіс на iPhone в Safari.
-2. **Активація в 1 клік**: Натисніть велику кнопку **«АКТИВУВАТИ»** та надайте доступ до GPS геолокації.
-3. **Фоновий моніторинг**: Закрийте сторінку або заблокуйте телефон і покладіть у кишеню. Хмарний бекенд продовжує безперервно відстежувати та фільтрувати публічну радіолокаційну інформацію.
-4. **Персональне локальне сповіщення**: Якщо виявлено підтверджену небезпеку поблизу вашого району (~5 км), телефон видає виразне звукове та голосове сповіщення:
-   > *«Кирил, увага. Є підтверджена інформація про потенційну загрозу (Керована авіабомба / БпЛА) поблизу вашого району [Назва]. Рекомендується негайно перейти в безпечне місце.»*
+1. Завантажте готовий файл застосунку:
+   👉 [**Завантажити PersonalSafetyAgent.ipa (Остання версія)**](https://github.com/romanchuk82-ctrl/personal-safety-agent/releases/latest/download/PersonalSafetyAgent.ipa)
+2. Встановіть через **Sideloadly** (Windows / Mac) або **Scarlet / TrollStore / SideStore** (без комп'ютера).
+
+---
+
+## ⚡ Автономний 24/7 Backend
+
+* **Хмарний деплой за 1 клік**: Натисніть кнопку **Deploy to Render** вгорі або скористайтеся `render.yaml`.
+* **Локальний запуск на ПК**:
+  * Windows: запуск `scripts\start_backend.ps1` (порт 3001)
+  * Linux / macOS: `bash scripts/start_backend.sh`
 
 ---
 

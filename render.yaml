@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: personal-safety-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    plan: free
+    region: frankfurt
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production

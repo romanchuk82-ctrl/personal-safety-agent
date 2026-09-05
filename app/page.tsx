@@ -51,7 +51,10 @@ import {
   Edit3,
   AlertCircle,
   Loader2,
-  Star
+  Star,
+  Download,
+  Smartphone,
+  ExternalLink
 } from 'lucide-react';
 import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic, getActiveAirRaidAlerts } from '@/lib/sources/alertsInUa';
 import {
@@ -197,6 +200,7 @@ export default function HomePage() {
   const [testCountdown, setTestCountdown] = useState<number | null>(null);
   const [testCompleted, setTestCompleted] = useState<boolean>(false);
   const [showRejectedModal, setShowRejectedModal] = useState<boolean>(false);
+  const [showIosInstallModal, setShowIosInstallModal] = useState<boolean>(false);
 
   // Collapsible Advanced Settings
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
@@ -2119,6 +2123,74 @@ export default function HomePage() {
                   </>
                 )}
               </button>
+
+              {/* DIRECT 1-CLICK IPHONE INSTALLATION (.IPA) & CLOUD BACKEND */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setShowIosInstallModal(!showIosInstallModal)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-700/80 via-indigo-700/80 to-purple-700/80 hover:from-blue-600 hover:to-indigo-600 text-white text-[11px] font-bold border border-blue-500/40 shadow-md flex items-center justify-between active:scale-[0.98] transition-all"
+                >
+                  <div className="flex items-center gap-2">
+                    <Smartphone className="w-4 h-4 text-cyan-300" />
+                    <span>ВСТАНОВИТИ НА IPHONE (READY .IPA)</span>
+                  </div>
+                  <Download className="w-3.5 h-3.5 text-cyan-200" />
+                </button>
+
+                {showIosInstallModal && (
+                  <div className="p-3 bg-black/80 rounded-xl border border-indigo-500/40 space-y-2.5 text-[10px] text-slate-300 animate-fadeIn">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                      <span className="font-bold text-cyan-300 uppercase tracking-wide">📦 Завантаження та Встановлення</span>
+                      <a
+                        href="https://github.com/romanchuk82-ctrl/personal-safety-agent/releases/latest"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono text-[9px]"
+                      >
+                        <span>GitHub Release</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+
+                    <a
+                      href="https://github.com/romanchuk82-ctrl/personal-safety-agent/releases/download/v1.0.0-ios/PersonalSafetyAgent.ipa"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>ЗАВАНТАЖИТИ PersonalSafetyAgent.ipa</span>
+                    </a>
+
+                    <div className="space-y-1.5 text-slate-400 text-[9px]">
+                      <p className="text-slate-200 font-semibold">Три найпростіші способи встановити за 2 хвилини без Mac:</p>
+                      <div className="bg-slate-900/90 p-2 rounded border border-slate-800 space-y-1">
+                        <div className="text-cyan-300 font-bold">1. Через комп'ютер (Sideloadly / AltStore):</div>
+                        <div>Завантажте IPA вище, підключіть iPhone кабелем до ПК, перетягніть IPA у Sideloadly та натисніть Start.</div>
+                      </div>
+                      <div className="bg-slate-900/90 p-2 rounded border border-slate-800 space-y-1">
+                        <div className="text-emerald-300 font-bold">2. Прямо з iPhone без комп'ютера (Scarlet / TrollStore):</div>
+                        <div>Відкрийте Scarlet або SideStore на iPhone, натисніть Import та виберіть завантажений PersonalSafetyAgent.ipa.</div>
+                      </div>
+                      <div className="bg-slate-900/90 p-2 rounded border border-slate-800 space-y-1">
+                        <div className="text-purple-300 font-bold">3. Автономний хмарний сервер 24/7 (Render):</div>
+                        <div className="flex items-center justify-between pt-0.5">
+                          <span>Розгортання безкоштовного сервера за 1 клік:</span>
+                          <a
+                            href="https://render.com/deploy?repo=https://github.com/romanchuk82-ctrl/personal-safety-agent"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="bg-purple-900/80 hover:bg-purple-800 text-purple-200 px-2 py-0.5 rounded font-bold border border-purple-700"
+                          >
+                            Deploy to Render 🚀
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {nativeTestAlertNotice && (
                 <div className="text-center text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/60 border border-cyan-800/80 rounded-lg py-1 px-2 animate-fadeIn">
