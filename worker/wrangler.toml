@@ -2,6 +2,8 @@ name = "personal-safety-backend"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 compatibility_flags = ["nodejs_compat"]
+account_id = "7532116e9d16abfc6b7eded7a89c4f72"
+workers_dev = true
 
 # Cloudflare Workers Configuration ($0 / Free Tier)
 # Private secrets (VAPID_PRIVATE_KEY, ALERTS_API_TOKEN) are injected via Cloudflare Worker Secrets
