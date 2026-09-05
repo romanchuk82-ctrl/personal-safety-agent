@@ -2497,1331 +2497,483 @@ export default function HomePage() {
         </div>
 
         {/* ========================================================================= */}
-        {/* TAB 4: ⚙️ НАЛАШТУВАННЯ (HOW DOES IT WORK?) */}
+        {/* TAB 4: ⚙️ НАЛАШТУВАННЯ (SETTINGS) */}
         {/* ========================================================================= */}
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <div className="mb-3 px-1">
-            <h2 className="text-sm font-black text-white flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-blue-400" />
-              <span>Налаштування та керування системою</span>
+          <div className="mb-4 px-1">
+            <h2 className="text-base font-black text-white flex items-center gap-2">
+              <Sliders className="w-5 h-5 text-blue-400" />
+              <span>Налаштування безпеки</span>
             </h2>
-            <p className="text-[11px] text-slate-400">Фоновий захист, геолокація, радіус та діагностика</p>
+            <p className="text-xs text-slate-400 mt-0.5">Керування захистом, сповіщеннями та джерелами</p>
           </div>
 
-          {/* 1. 🔔 ФОНОВІ СПОВІЩЕННЯ ($0 iOS 16.4+ WEB PUSH & LOCK SCREEN) */}
-          <div className="mb-4 p-3.5 bg-[#090d16] border border-blue-500/40 rounded-2xl space-y-3 shadow-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-blue-300 flex items-center gap-1.5 uppercase tracking-wide">
-                <Bell className="w-4 h-4 text-blue-400" />
-                <span>ФОНОВІ СПОВІЩЕННЯ</span>
-              </span>
-
-              {/* TRUTH STATUS: ⚪ / 🟡 / 🟢 */}
-              <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
-                isIosBrowser && !isPwaStandalone
-                  ? 'bg-slate-900 text-slate-400 border-slate-700'
-                  : isWebPushSubscribed && !webPushNeedsSync
-                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
-                  : webPushNeedsSync
-                  ? 'bg-amber-950/80 text-amber-300 border-amber-800'
-                  : 'bg-slate-900 text-slate-400 border-slate-700'
-              )}>
-                {isIosBrowser && !isPwaStandalone ? (
-                  '⚪ ПОТРІБНО ВСТАНОВИТИ НА IPHONE'
-                ) : isWebPushSubscribed && !webPushNeedsSync ? (
-                  '🟢 WEB PUSH ACTIVE'
-                ) : webPushNeedsSync ? (
-                  '🟡 WEB PUSH NEEDS SYNC'
-                ) : (
-                  '⚪ WEB PUSH OFF'
-                )}
-              </span>
-            </div>
-
-            {/* CASE A: PWA NOT INSTALLED ON IPHONE */}
-            {isIosBrowser && !isPwaStandalone ? (
-              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-700 space-y-2 text-slate-300 text-xs">
-                <div className="flex items-center gap-2 text-amber-300 font-bold text-[11px]">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Для роботи сповіщень на замкненому екрані iPhone:</span>
+          {/* 1. 🔔 СПОВІЩЕННЯ (NOTIFICATIONS — ON/OFF) */}
+          <div className="mb-3.5 p-4 bg-[#0a0f18] border border-[#1a2538] rounded-2xl shadow-md">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isWebPushSubscribed && !webPushNeedsSync ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-slate-800/60 text-slate-400 border border-slate-700/50'}`}>
+                  <Bell className="w-5 h-5" />
                 </div>
-                <div className="bg-black/50 p-2.5 rounded-lg border border-slate-800 text-[11px] font-mono text-cyan-200 space-y-1.5">
-                  <p>1. Відкрийте Safari</p>
-                  <p>2. Натисніть кнопку <strong>«Поділитися»</strong> (іконка ⬆️)</p>
-                  <p>3. Оберіть <strong>«На початковий екран»</strong></p>
-                  <p>4. Відкрийте <strong>Personal Safety Agent</strong> з Home Screen</p>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">Сповіщення</h3>
+                  <p className="text-xs text-slate-400 truncate">
+                    {isWebPushSubscribed && !webPushNeedsSync
+                      ? 'Отримувати тривоги на заблокований екран'
+                      : webPushNeedsSync
+                      ? 'Потрібна синхронізація з сервером'
+                      : 'Фонові сповіщення вимкнено'}
+                  </p>
                 </div>
-                <p className="text-[10px] text-slate-400 italic">
-                  * Обмеження Apple iOS: Push API доступний виключно з Home Screen (iOS 16.4+).
-                </p>
               </div>
-            ) : webPushNeedsSync ? (
-              /* CASE B: BROWSER SUBSCRIPTION EXISTS, BUT BACKEND REGISTRATION FAILED */
-              <div className="p-3 bg-amber-950/40 rounded-xl border border-amber-800/80 space-y-2.5 text-xs text-amber-200">
-                <div className="flex items-center gap-2 font-bold text-amber-300">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Потрібна синхронізація з сервером (NEEDS SYNC)</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-snug">
-                  Браузерну Web Push підписку створено, але хмарний бекенд не підтвердив її реєстрацію (ACK). Натисніть кнопку нижче для повторної синхронізації:
-                </p>
-                <div className="flex gap-2 pt-1">
+
+              {/* Action Button: ON / OFF / SYNC */}
+              <div className="shrink-0">
+                {isWebPushSubscribed && !webPushNeedsSync ? (
+                  <button
+                    type="button"
+                    onClick={handleUnsubscribeWebPush}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-500/25 active:scale-95 transition-all"
+                    title="Натисніть, щоб вимкнути"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>УВІМКНЕНО</span>
+                  </button>
+                ) : webPushNeedsSync ? (
                   <button
                     type="button"
                     disabled={isSubscribingPush}
                     onClick={handleReSyncWebPush}
-                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-[0.98] transition-all disabled:opacity-50"
+                    className="px-3.5 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 hover:bg-amber-500/25 active:scale-95 transition-all disabled:opacity-50"
                   >
-                    <RefreshCw className={'w-3.5 h-3.5 ' + (isSubscribingPush ? 'animate-spin' : '')} />
-                    <span>{isSubscribingPush ? 'СИНХРОНІЗАЦІЯ...' : 'ПОВТОРИТИ СИНХРОНІЗАЦІЮ'}</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSubscribingPush ? 'animate-spin' : ''}`} />
+                    <span>СИНХРОНІЗУВАТИ</span>
                   </button>
+                ) : (
                   <button
                     type="button"
-                    onClick={handleUnsubscribeWebPush}
-                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all"
+                    disabled={isSubscribingPush}
+                    onClick={handleSubscribeWebPush}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-50"
                   >
-                    Скинути
+                    <Bell className="w-3.5 h-3.5" />
+                    <span>{isSubscribingPush ? 'УВІМКНЕННЯ...' : 'УВІМКНУТИ'}</span>
                   </button>
-                </div>
-              </div>
-            ) : !isWebPushSubscribed || !hasBrowserSubscription ? (
-              /* CASE C: NO SUBSCRIPTION */
-              <div className="space-y-2.5">
-                <p className="text-[11px] text-slate-300 leading-snug">
-                  Для отримання тривог при заблокованому iPhone увімкніть фонові Web Push сповіщення ($0 без Apple Dev Program):
-                </p>
-                <button
-                  type="button"
-                  disabled={isSubscribingPush}
-                  onClick={handleSubscribeWebPush}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-[0.98] transition-all disabled:opacity-50"
-                >
-                  <Bell className="w-4 h-4" />
-                  <span>{isSubscribingPush ? 'АКТИВАЦІЯ ПІДПИСКИ...' : 'УВІМКНУТИ СПОВІЩЕННЯ'}</span>
-                </button>
-              </div>
-            ) : (
-              /* CASE D: REAL WEB PUSH ACTIVE -> TEST CONTROLS */
-              <div className="space-y-3">
-                <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/80 rounded-xl flex items-center justify-between text-xs text-emerald-200">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="font-bold text-[11px]">Фонова Web Push підписка активна</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-emerald-300 font-bold">$0 VAPID</span>
-                </div>
-
-                {/* REAL TEST PUSH BUTTON */}
-                <button
-                  type="button"
-                  disabled={testThreatLoading || lockScreenCountdown > 0}
-                  onClick={handleSendTestThreatPush}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all disabled:opacity-50"
-                >
-                  <ShieldAlert className="w-4 h-4" />
-                  <span>
-                    {lockScreenCountdown > 0
-                      ? `ТЕСТ ВІДПРАВЛЕНО (${lockScreenCountdown}с) — ЗАБЛОКУЙТЕ IPHONE`
-                      : testThreatLoading
-                      ? 'ЗВ\'ЯЗОК ІЗ СЕРВЕРОМ...'
-                      : 'НАДІСЛАТИ TEST DANGER'}
-                  </span>
-                </button>
-
-                {lockScreenCountdown > 0 && (
-                  <div className="p-3 bg-amber-950/80 border border-amber-600 rounded-xl text-center space-y-1 animate-pulse">
-                    <p className="text-amber-200 font-black text-xs">
-                      «Тест надіслано. Заблокуйте iPhone.»
-                    </p>
-                    <p className="text-amber-300 text-[10px] font-mono">
-                      Сповіщення надійде через {lockScreenCountdown} сек. Повністю вимкніть екран кнопкою блокування.
-                    </p>
-                  </div>
                 )}
-
-                {/* LOCKED SCREEN PHYSICAL TEST AUDIT */}
-                <div className="p-3 bg-black/60 rounded-xl border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono font-bold text-slate-400">LOCK SCREEN TEST:</span>
-                    <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
-                      lockScreenTestStatus === 'VERIFIED'
-                        ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                        : 'bg-amber-950/80 text-amber-300 border-amber-800'
-                    )}>
-                      {lockScreenTestStatus === 'VERIFIED'
-                        ? '🟢 VERIFIED'
-                        : '🟡 WAITING FOR PHYSICAL IPHONE TEST'}
-                    </span>
-                  </div>
-
-                  {lockScreenTestStatus !== 'VERIFIED' ? (
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleConfirmLockScreenVerified}
-                        className="flex-1 py-2 px-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>ПІДТВЕРДЖУЮ: СПОВІЩЕННЯ ОТРИМАНО</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSendTestThreatPush}
-                        className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg text-[10px] flex items-center justify-center gap-1 transition-all"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>ЩЕ РАЗ</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between text-[10px] text-emerald-400 pt-1 border-t border-slate-800">
-                      <span>✓ Фізичний тест на замкненому екрані iPhone пройдено</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLockScreenTestStatus('WAITING');
-                          localStorage.removeItem('psa_lockscreen_verified');
-                        }}
-                        className="text-slate-500 hover:text-slate-300 text-[9px] underline"
-                      >
-                        Скинути
-                      </button>
-                    </div>
-                  )}
-
-                  {/* CLOUD DELIVERY PHYSICAL TEST */}
-                  <div className="pt-2 border-t border-slate-800/80">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-bold text-slate-400">CLOUD DELIVERY:</span>
-                      <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
-                        cloudDeliveryStatus === 'VERIFIED'
-                          ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                          : 'bg-amber-950/80 text-amber-300 border-amber-800'
-                      )}>
-                        {cloudDeliveryStatus === 'VERIFIED'
-                          ? '🟢 VERIFIED'
-                          : '🟡 WAITING FOR PHYSICAL TEST'}
-                      </span>
-                    </div>
-                    {cloudDeliveryStatus !== 'VERIFIED' ? (
-                      <div className="pt-1.5">
-                        <button
-                          type="button"
-                          onClick={handleConfirmCloudDeliveryVerified}
-                          className="w-full py-2 px-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>ПІДТВЕРДЖУЮ CLOUD DELIVERY НА IPHONE</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between text-[10px] text-emerald-400 pt-1">
-                        <span>✓ Доставку через Cloudflare Worker підтверджено</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCloudDeliveryStatus('WAITING');
-                            localStorage.removeItem('psa_cloud_delivery_verified');
-                          }}
-                          className="text-slate-500 hover:text-slate-300 text-[9px] underline"
-                        >
-                          Скинути
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {nativeTestAlertNotice && (
-              <div className="text-center text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/60 border border-cyan-800/80 rounded-lg py-1.5 px-2 animate-fadeIn">
-                {nativeTestAlertNotice}
-              </div>
-            )}
-
-            {/* TRUTH AUDIT INDICATORS */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px] pt-1">
-              {/* 1. SERVER 24/7 */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">SERVER 24/7:</span>
-                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
-                  {backendServerOnline === true ? '🟢 24/7 CLOUD ACTIVE' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
-                </span>
-                <span className="text-[8px] text-slate-500">GitHub Cloud Scheduler ($0)</span>
-              </div>
-
-              {/* 2. LOCAL PC */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">LOCAL PC:</span>
-                <span className="font-bold mt-0.5 text-slate-400">
-                  ⚪ NOT REQUIRED
-                </span>
-                <span className="text-[8px] text-slate-500">Домашній ПК вимкнено</span>
-              </div>
-
-              {/* 3. CLOUDFLARE QUICK TUNNEL */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">CLOUDFLARE QUICK TUNNEL:</span>
-                <span className="font-bold mt-0.5 text-slate-400">
-                  ⚪ NOT USED
-                </span>
-                <span className="text-[8px] text-slate-500 truncate">Постійний HTTPS backend</span>
-              </div>
-
-              {/* 4. CURRENT WEB PUSH */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">CURRENT WEB PUSH:</span>
-                <span className={'font-bold mt-0.5 ' + (
-                  isWebPushSubscribed && !webPushNeedsSync
-                    ? 'text-emerald-400'
-                    : webPushNeedsSync
-                    ? 'text-amber-400'
-                    : 'text-slate-400'
-                )}>
-                  {isWebPushSubscribed && !webPushNeedsSync
-                    ? '🟢 ACTIVE'
-                    : webPushNeedsSync
-                    ? '🟡 NEEDS SYNC'
-                    : '⚪ OFF'}
-                </span>
-                <span className="text-[8px] text-slate-500 truncate">
-                  {isWebPushSubscribed && !webPushNeedsSync
-                    ? 'Підтверджено бекендом'
-                    : webPushNeedsSync
-                    ? 'Очікує синхронізації'
-                    : 'Підписка відсутня'}
-                </span>
-              </div>
-
-              {/* 5. CRITICAL ALERTS */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">CRITICAL ALERTS:</span>
-                <span className="font-bold mt-0.5 text-slate-400">
-                  ⚪ NOT AVAILABLE IN $0 PWA
-                </span>
-                <span className="text-[8px] text-slate-500">Стандартний системний звук</span>
-              </div>
-
-              {/* 6. TELEGRAM FALLBACK */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">TELEGRAM BOT:</span>
-                <span className={'font-bold mt-0.5 ' + (telegramChatId.trim().length > 0 ? 'text-emerald-400' : 'text-slate-400')}>
-                  {telegramChatId.trim().length > 0 ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
-                </span>
-                <span className="text-[8px] text-slate-500 truncate">
-                  {telegramChatId.trim().length > 0 ? `Chat ID: ${telegramChatId}` : 'Резервний дублер'}
-                </span>
               </div>
             </div>
 
-            {/* HISTORICAL TESTS (Separate from current operational status) */}
-            <div className="pt-2 border-t border-slate-800/80">
-              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider block mb-1.5">
-                Історичні тести (не є поточним операційним станом):
-              </span>
-              <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                <div className="bg-black/40 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                  <span className="text-slate-400 text-[9px] font-mono">LAST LOCK SCREEN TEST:</span>
-                  <span className={'font-bold mt-0.5 ' + (lockScreenTestStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-slate-400')}>
-                    {lockScreenTestStatus === 'VERIFIED' ? '🟢 VERIFIED' : '⚪ NOT RUN'}
-                  </span>
-                  <span className="text-[8px] text-slate-500 truncate">Ручний тест на замкненому екрані</span>
-                </div>
-                <div className="bg-black/40 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                  <span className="text-slate-400 text-[9px] font-mono">LAST CLOUD DELIVERY TEST:</span>
-                  <span className={'font-bold mt-0.5 ' + (cloudDeliveryStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-slate-400')}>
-                    {cloudDeliveryStatus === 'VERIFIED' ? '🟢 VERIFIED' : '⚪ NOT RUN'}
-                  </span>
-                  <span className="text-[8px] text-slate-500 truncate">Хмарне push-сповіщення</span>
+            {/* iOS Safari Home Screen Hint */}
+            {isIosBrowser && !isPwaStandalone && (
+              <div className="mt-3 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] text-slate-300 flex items-start gap-2">
+                <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-white">Для сповіщень на iPhone:</span>
+                  <p className="text-slate-400 mt-0.5">В Safari натисніть «Поділитися» ⬆️ → «На початковий екран» 📲</p>
                 </div>
               </div>
-            </div>
-
-            <p className="text-[9px] text-slate-400 italic">
-              * Після блокування iPhone браузер не витрачає батарею; моніторинг здійснюється цілодобово на бекенді.
-            </p>
+            )}
           </div>
 
+          {/* 2. 📍 ГЕОЛОКАЦІЯ (GEOLOCATION — AUTO + ПОТОЧНА ЛОКАЦІЯ) */}
+          <div className="mb-3.5 p-4 bg-[#0a0f18] border border-[#1a2538] rounded-2xl shadow-md space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center shrink-0">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">Геолокація</h3>
+                  <p className="text-xs text-slate-400 truncate">
+                    {trustedLocation?.lockMode === 'AUTO' ? 'Автоматичний GPS у русі' : 'Фіксована локація'}
+                  </p>
+                </div>
+              </div>
 
-          {/* 2. 📍 КЕРУВАННЯ ГЕОЛОКАЦІЄЮ (4 MODES: АВТО, ДІМ, РОБОТА, РУЧНА) */}
-          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-blue-400" />
-                <span>Керування геолокацією</span>
-              </span>
-              <span className="text-[9px] font-mono text-cyan-300 font-bold px-1.5 py-0.5 bg-blue-950/80 rounded border border-blue-800">
-                4 РЕЖИМИ
-              </span>
-            </div>
-
-            {/* 4 MODES BUTTONS BAR */}
-            <div className="p-1 bg-[#070a10] rounded-xl border border-slate-800">
-              <div className="grid grid-cols-4 gap-1 text-[10px] font-bold">
+              {/* Mode buttons: AUTO vs Pick */}
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
+                  type="button"
                   onClick={handleSwitchToAutoGps}
-                  className={'py-2 px-1 rounded-lg flex flex-col items-center justify-center gap-1 transition-all ' + (
-                    activeLocationPreset === 'AUTO' && trustedLocation?.lockMode === 'AUTO'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                  )}
-                  title="Автоматичний GPS у русі"
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1 transition-all ${
+                    trustedLocation?.lockMode === 'AUTO'
+                      ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                      : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700'
+                  }`}
+                  title="Увімкнути автоматичний GPS"
                 >
                   <Radio className="w-3.5 h-3.5 text-blue-300" />
-                  <span>📍 АВТО</span>
+                  <span>AUTO</span>
                 </button>
-
-                <button
-                  onClick={handleSelectHomeLocation}
-                  className={'py-2 px-1 rounded-lg flex flex-col items-center justify-center gap-1 transition-all ' + (
-                    activeLocationPreset === 'HOME'
-                      ? 'bg-emerald-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                  )}
-                  title={homeLocation ? `Дім: ${homeLocation.name}` : 'Встановити точку Дім'}
-                >
-                  <MapPin className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>🏠 ДІМ</span>
-                </button>
-
-                <button
-                  onClick={handleSelectWorkLocation}
-                  className={'py-2 px-1 rounded-lg flex flex-col items-center justify-center gap-1 transition-all ' + (
-                    activeLocationPreset === 'WORK'
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                  )}
-                  title={workLocation ? `Робота: ${workLocation.name}` : 'Встановити точку Робота'}
-                >
-                  <Navigation className="w-3.5 h-3.5 text-indigo-300" />
-                  <span>🏢 РОБОТА</span>
-                </button>
-
-                <button
-                  onClick={() => setShowLocationModal(true)}
-                  className={'py-2 px-1 rounded-lg flex flex-col items-center justify-center gap-1 transition-all ' + (
-                    activeLocationPreset === 'MANUAL'
-                      ? 'bg-cyan-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                  )}
-                  title="Обрати місто зі списку або на карті"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-cyan-300" />
-                  <span>✏️ РУЧНА</span>
-                </button>
-              </div>
-            </div>
-
-            {/* FAILSAFE STATUS INDICATOR */}
-            <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 text-[10px] space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400 font-mono">ПОТОЧНИЙ РЕЖИМ:</span>
-                <span className="font-bold text-white truncate max-w-[200px]">
-                  {activeLocationPreset === 'AUTO' ? '📍 АВТО-GPS (Динамічний трекінг)' :
-                   activeLocationPreset === 'HOME' ? `🏠 ДІМ (${homeLocation?.name || 'Київ'})` :
-                   activeLocationPreset === 'WORK' ? `🏢 РОБОТА (${workLocation?.name || 'Бориспіль'})` :
-                   `✏️ РУЧНА ТОЧКА (${trustedLocation?.name || 'Обрана'})`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-[9px] text-slate-400 border-t border-slate-800/80 pt-1">
-                <span>FAILSAFE ЗАХИСТ:</span>
-                <span className="text-emerald-400 font-mono font-bold">🟢 АКТИВНИЙ (Авто-резерв при втраті GPS)</span>
-              </div>
-            </div>
-
-            {/* QUICK SAVE CURRENT LOCATION BUTTONS */}
-            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-              <button
-                type="button"
-                onClick={handleSaveCurrentAsHome}
-                className="py-1.5 px-2 bg-slate-800/80 hover:bg-slate-700/80 text-emerald-300 border border-slate-700 rounded-lg flex items-center justify-center gap-1 font-semibold"
-              >
-                <span>🏠 Зберегти як ДІМ</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveCurrentAsWork}
-                className="py-1.5 px-2 bg-slate-800/80 hover:bg-slate-700/80 text-indigo-300 border border-slate-700 rounded-lg flex items-center justify-center gap-1 font-semibold"
-              >
-                <span>🏢 Зберегти як РОБОТА</span>
-              </button>
-            </div>
-
-            {/* CITY PRESET SELECTOR (10 CITIES) */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] text-slate-400 font-semibold">Резервний вибір міста:</span>
-                <button
-                  onClick={() => setShowLocationModal(true)}
-                  className="text-[10px] text-cyan-400 font-bold underline"
-                >
-                  Більше міст (800+)
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5 max-h-28 overflow-y-auto pr-1">
-                {CITY_PRESETS.slice(0, 8).map((city) => (
-                  <button
-                    key={city.name}
-                    onClick={() => handleSelectManualLocation(city.lat, city.lng, city.name, city.oblast)}
-                    className={'p-2 rounded-xl text-left text-[11px] border truncate ' + (
-                      trustedLocation?.name === city.name
-                        ? 'bg-blue-900/50 border-blue-400 text-blue-200 font-bold'
-                        : 'bg-[#070a10] border-slate-800 text-slate-300 hover:bg-slate-800'
-                    )}
-                  >
-                    <p className="font-semibold text-white truncate">{city.name.split(' (')[0]}</p>
-                    <p className="text-[9px] text-slate-400 truncate">{city.name.split(' (')[1]?.replace(')', '') || city.oblast}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 4. 🚨 ТЕСТ НА ЗАМКНЕНОМУ ЕКРАНІ (LOCKED-SCREEN THREAT TESTS & $0 CHANNELS) */}
-          <div className="mb-4 p-3.5 bg-[#120a0a] border border-rose-500/40 rounded-2xl space-y-3 shadow-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-rose-300 flex items-center gap-1.5 uppercase tracking-wide">
-                <ShieldAlert className="w-4 h-4 text-rose-400" />
-                <span>Тест на замкненому екрані</span>
-              </span>
-              <span className="text-[9px] font-mono text-rose-300 font-bold px-2 py-0.5 rounded bg-rose-950/80 border border-rose-700">
-                VAPID + TELEGRAM
-              </span>
-            </div>
-
-            <p className="text-[10px] text-slate-300 leading-snug">
-              Перевірте негайне отримання тривоги крізь заблокований екран без витрат на платні Apple сертифікати:
-            </p>
-
-            {/* 3 REAL THREAT TEST BUTTONS */}
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                disabled={testThreatLoading}
-                onClick={() => handleTriggerTestThreat('TEST_THREAT_5KM')}
-                className="py-2.5 px-1 rounded-xl bg-rose-950/80 hover:bg-rose-900/80 text-rose-200 border border-rose-700 font-bold text-[10px] flex flex-col items-center justify-center gap-1 active:scale-95 shadow-sm transition-all disabled:opacity-50"
-              >
-                <Crosshair className="w-3.5 h-3.5 text-rose-400" />
-                <span>🎯 ЗАГРОЗА 5 КМ</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={testThreatLoading}
-                onClick={() => handleTriggerTestThreat('TEST_THREAT_15KM')}
-                className="py-2.5 px-1 rounded-xl bg-amber-950/80 hover:bg-amber-900/80 text-amber-200 border border-amber-700 font-bold text-[10px] flex flex-col items-center justify-center gap-1 active:scale-95 shadow-sm transition-all disabled:opacity-50"
-              >
-                <RadarIcon className="w-3.5 h-3.5 text-amber-400" />
-                <span>🔴 ЗАГРОЗА 15 КМ</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={testThreatLoading}
-                onClick={() => handleTriggerTestThreat('TEST_MOVING_THREAT')}
-                className="py-2.5 px-1 rounded-xl bg-purple-950/80 hover:bg-purple-900/80 text-purple-200 border border-purple-700 font-bold text-[10px] flex flex-col items-center justify-center gap-1 active:scale-95 shadow-sm transition-all disabled:opacity-50"
-              >
-                <Navigation className="w-3.5 h-3.5 text-purple-400" />
-                <span>🚗 РУХОМА ЦІЛЬ</span>
-              </button>
-            </div>
-
-            {/* DELIVERY CHANNELS: WEB PUSH & TELEGRAM CONFIG */}
-            <div className="space-y-2 pt-1">
-              {/* CHANNEL 1: PWA WEB PUSH (VAPID $0) */}
-              <div className="bg-black/50 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
-                <div>
-                  <span className="text-[10px] font-bold text-white block">🔔 Safari / PWA Web Push</span>
-                  <span className="text-[8px] text-slate-400">Штатний безкоштовний Apple Web Push (iOS 16.4+)</span>
-                </div>
                 <button
                   type="button"
-                  onClick={handleSubscribeWebPush}
-                  className={'py-1.5 px-2.5 rounded-lg text-[9px] font-bold border transition-all ' + (
-                    isWebPushSubscribed
-                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500'
-                  )}
+                  onClick={() => setShowLocationModal(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1 transition-all"
+                  title="Обрати інший населений пункт"
                 >
-                  {isWebPushSubscribed ? '✓ УВІМКНЕНО' : 'УВІМКНУТИ'}
+                  <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Змінити</span>
                 </button>
               </div>
-              <p className="text-[9px] text-slate-400 leading-snug px-1">
-                iPhone: Налаштування → Сповіщення → Personal Safety Agent → увімкніть «Звуки» та «Замкнений екран». Якщо iOS показує «Термінові сповіщення», увімкніть також.
-              </p>
+            </div>
 
-              {/* CHANNEL 2: TELEGRAM BOT PUSH ($0 INSTANT FALLBACK) */}
-              <div className="bg-black/50 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-white">✈️ Telegram Bot Сповіщення</span>
-                  <span className="text-[8px] text-cyan-300 font-mono">Миттєвий дублер</span>
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={telegramChatId}
-                    onChange={(e) => setTelegramChatId(e.target.value)}
-                    placeholder="Введіть ваш Telegram Chat ID (напр. 123456789)"
-                    className="flex-1 bg-[#070a10] border border-slate-700 rounded-lg px-2.5 py-1.5 text-[10px] text-white font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleSaveTelegramChatId(telegramChatId)}
-                    className="py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-[10px]"
-                  >
-                    Зберегти
-                  </button>
-                </div>
+            {/* Current Location Box */}
+            <div className="p-3 rounded-xl bg-[#070a10] border border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
+                <span className="text-xs font-semibold text-white truncate">
+                  {trustedLocation?.name || 'Визначається локація...'}
+                </span>
               </div>
-
-              {/* LOCAL AUDIO PREVIEW */}
-              <button
-                type="button"
-                onClick={handleNativeSoundPreview}
-                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5"
-              >
-                <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Прослухати звук сирени (danger_alarm.wav)</span>
-              </button>
+              <span className="text-[11px] font-mono text-slate-400 shrink-0 pl-2">
+                {trustedLocation?.oblast || ''}
+              </span>
             </div>
           </div>
 
-          {/* 5. 🚗 РЕАЛЬНА ДІАГНОСТИКА ПОЇЗДКИ (DRIVING TEST DIAGNOSTICS) */}
-          <div className="mb-4 p-3.5 bg-[#0a0e1a] border border-cyan-500/40 rounded-2xl space-y-3 shadow-lg">
+          {/* 3. 🎯 РАДІУС ЗАГРОЗИ (THREAT RADIUS — 5 / 15 / 30 / 45 KM) */}
+          <div className="mb-3.5 p-4 bg-[#0a0f18] border border-[#1a2538] rounded-2xl shadow-md space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-cyan-300 flex items-center gap-1.5 uppercase tracking-wide">
-                <Navigation className="w-4 h-4 text-cyan-400" />
-                <span>Реальна діагностика поїздки</span>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center">
+                  <RadarIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Радіус загрози</h3>
+                  <p className="text-xs text-slate-400">Дистанція тривожного сповіщення</p>
+                </div>
+              </div>
+              <span className="text-sm font-mono font-black text-blue-400 px-2.5 py-0.5 rounded-lg bg-blue-950/60 border border-blue-800/60">
+                {radiusKm.toFixed(0)} км
               </span>
-              <button
-                type="button"
-                onClick={handleRefreshDrivingDiagnostics}
-                className="text-[9px] font-mono text-cyan-300 font-bold px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-700 flex items-center gap-1 hover:bg-cyan-900"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>ОНОВИТИ</span>
-              </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[9px] font-mono block">СЕМПЛІВ У РУСІ:</span>
-                <span className="font-bold text-cyan-300 text-xs mt-0.5 block">
-                  {drivingDiagnostics?.sampleCount ?? 18} точок
-                </span>
-              </div>
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[9px] font-mono block">СЕРЕДНІЙ ІНТЕРВАЛ:</span>
-                <span className="font-bold text-emerald-400 text-xs mt-0.5 block font-mono">
-                  {drivingDiagnostics?.avgIntervalSec ? `${drivingDiagnostics.avgIntervalSec} с` : '180 с'}
-                </span>
-              </div>
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[9px] font-mono block">МАКС. ІНТЕРВАЛ:</span>
-                <span className="font-bold text-cyan-300 text-xs mt-0.5 block font-mono">
-                  {drivingDiagnostics?.maxIntervalSec ? `${drivingDiagnostics.maxIntervalSec} с` : '235 с'}
-                </span>
-              </div>
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[9px] font-mono block">СЕРЕДНІЙ ВІК GPS:</span>
-                <span className="font-bold text-emerald-400 text-xs mt-0.5 block font-mono">
-                  {drivingDiagnostics?.avgLocationAgeSec ? `${drivingDiagnostics.avgLocationAgeSec} с` : '38 с'}
-                </span>
-              </div>
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[9px] font-mono block">СЕРЕДНЯ ТОЧНІСТЬ:</span>
-                <span className="font-bold text-cyan-300 text-xs mt-0.5 block font-mono">
-                  ±{drivingDiagnostics?.avgAccuracyMeters ? Math.round(drivingDiagnostics.avgAccuracyMeters) : 9.8} м
-                </span>
-              </div>
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 text-[9px] font-mono block">LOW POWER MODE:</span>
-                <span className="font-bold text-emerald-300 text-xs mt-0.5 block">
-                  🟢 Безпечно
-                </span>
-              </div>
-            </div>
-
-            <p className="text-[9px] text-slate-400 italic">
-              * Гарантує, що під час руху в авто на швидкості оновлення не перериваються і координати не старіють понад 5 хвилин.
-            </p>
-          </div>
-
-          {/* SECTION 2: RADIUS SENSITIVITY */}
-          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                <RadarIcon className="w-3.5 h-3.5 text-blue-400" />
-                <span>Радіус сповіщення (Зона захисту)</span>
-              </span>
-              <span className="font-mono font-bold text-blue-300 text-xs">{radiusKm.toFixed(0)} км</span>
-            </div>
-            <div className="grid grid-cols-4 gap-1.5">
-              {[
-                { r: 5, label: '🎯 5 км' },
-                { r: 15, label: '🔴 15 км' },
-                { r: 30, label: '🟠 30 км' },
-                { r: 45, label: '🟡 45 км' }
-              ].map((p) => (
+            {/* 4 Quick Selector Buttons: 5 / 15 / 30 / 45 km */}
+            <div className="grid grid-cols-4 gap-2">
+              {[5, 15, 30, 45].map((r) => (
                 <button
-                  key={p.r}
-                  onClick={() => handleRadiusChange(p.r)}
-                  className={'py-1.5 rounded-lg text-[10px] font-bold border transition-all ' + (
-                    radiusKm === p.r
-                      ? 'bg-blue-600 text-white border-blue-400 shadow-sm'
-                      : 'bg-[#070a10] text-slate-300 border-slate-800 hover:bg-slate-800'
-                  )}
+                  key={r}
+                  type="button"
+                  onClick={() => handleRadiusChange(r)}
+                  className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
+                    radiusKm === r
+                      ? 'bg-blue-600 text-white border-blue-400 shadow-md scale-[1.02]'
+                      : 'bg-[#070a10] text-slate-300 border-slate-800 hover:bg-slate-800/80 hover:text-white'
+                  }`}
                 >
-                  {p.label}
+                  {r} км
                 </button>
               ))}
             </div>
-            <input
-              type="range"
-              min="3"
-              max="45"
-              value={radiusKm}
-              onChange={(e) => handleRadiusChange(parseFloat(e.target.value))}
-              className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-            />
           </div>
 
-          {/* SECTION 3: AUDIO & VOICE SETTINGS */}
-          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-2.5">
+          {/* 4. ✈️ TELEGRAM-КАНАЛИ (CHANNELS MANAGEMENT: LIST, ADD, DELETE, ★ USER PRIORITY) */}
+          <div className="mb-3.5 p-4 bg-[#0a0f18] border border-[#1a2538] rounded-2xl shadow-md space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Volume2 className="w-3.5 h-3.5 text-blue-400" />
-                <span>Голосовий режим (Ajax диктор)</span>
-              </span>
-              <button
-                onClick={() => handleToggleAudio()}
-                className={'px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ' + (
-                  audioEnabled
-                    ? 'bg-blue-600 text-white border-blue-400'
-                    : 'bg-slate-800 text-slate-400 border-slate-700'
-                )}
-              >
-                {audioEnabled ? 'УВІМКНЕНО' : 'ВИМКНЕНО'}
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-300 leading-relaxed">
-              {audioEnabled
-                ? 'При прямій загрозі пролунає чітке голосове сповіщення диктора українською мовою.'
-                : 'Тихий режим. Голосові оголошення вимкнено.'}
-            </p>
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={handleManualVoiceTest}
-                className="flex-1 py-2 px-3 bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 border border-blue-800 rounded-xl font-bold text-[11px]"
-              >
-                Прослухати голос 🔊
-              </button>
-              <button
-                onClick={startEmergencyPushTest}
-                className="flex-1 py-2 px-3 bg-amber-950/80 hover:bg-amber-900/80 text-amber-300 border border-amber-800 rounded-xl font-bold text-[11px]"
-              >
-                Тест на замкненому екрані
-              </button>
-            </div>
-          </div>
-
-          {/* SECTION 4: OFFICIAL ALERTS LAYER & DIAGNOSTICS */}
-          <div className="mb-4 p-3.5 bg-[#120808] border border-rose-900/80 rounded-2xl space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-rose-200 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                <span>Шар офіційних повітряних тривог</span>
-              </span>
-              <span className={'text-[9px] font-mono px-2 py-0.5 rounded border font-bold ' + (
-                alertsDiagnostic.sourceOnline
-                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
-                  : 'bg-red-950 text-red-300 border-red-800'
-              )}>
-                {alertsDiagnostic.sourceOnline ? 'ONLINE' : 'OFFLINE'}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Telegram-канали</h3>
+                  <p className="text-xs text-slate-400">Моніторинг джерел та пріоритетів</p>
+                </div>
+              </div>
+              <span className="text-xs font-mono font-bold text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                {allSources.length} джерел
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={handleOfficialAlertsRefresh}
-              disabled={isRefreshingOfficial}
-              className="w-full py-2 px-3 rounded-xl border border-rose-800 bg-rose-950/70 hover:bg-rose-900/70 disabled:opacity-60 text-rose-100 text-[10px] font-bold flex items-center justify-center gap-2"
-            >
-              <RefreshCw className={'w-3.5 h-3.5 ' + (isRefreshingOfficial ? 'animate-spin' : '')} />
-              {isRefreshingOfficial ? 'Отримання свіжого стану…' : 'Оновити official alerts зараз'}
-            </button>
-
-            {alertsDiagnostic.isStale && (
-              <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-700 text-amber-300 text-[10px] flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                <span>{alertsDiagnostic.sourceOnline
-                  ? `⚠️ Дані official source старші за 60с (${alertsDiagnostic.dataAgeSec}с). Полігони приховано.`
-                  : '⚠️ Official source недоступний. Попередні полігони очищено й не подано як актуальні.'}</span>
-              </div>
-            )}
-
-            {/* LIVE PIPELINE METRICS TABLE */}
-            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ДЖЕРЕЛО ALERTS.IN.UA:</span>
-                <span className="font-mono font-bold text-emerald-400 flex items-center gap-1 mt-0.5">
-                  <span className={'w-1.5 h-1.5 rounded-full ' + (alertsDiagnostic.sourceOnline ? 'bg-emerald-400' : 'bg-red-500')} />
-                  <span>{alertsDiagnostic.sourceOnline ? 'ONLINE (7.5s цикл)' : 'OFFLINE'}</span>
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ACTIVE OFFICIAL ZONES:</span>
-                <span className="font-mono font-bold text-rose-300 mt-0.5 block">
-                  {activeOfficialAlertsCount} зон
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ОНОВЛЕНО ДЖЕРЕЛОМ:</span>
-                <span className="font-mono font-bold text-cyan-300 truncate block mt-0.5">
-                  {alertsDiagnostic.sourceUpdatedIso
-                    ? formatTimeHHMMSS(alertsDiagnostic.sourceUpdatedIso)
-                    : '—'}
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ВІК ДАНИХ (LATENCY):</span>
-                <span className={'font-mono font-bold mt-0.5 block ' + (alertsDiagnostic.isStale ? 'text-amber-400' : 'text-emerald-400')}>
-                  {officialSnapshotAgeSec} с
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ВАША ТЕРИТОРІЯ:</span>
-                <span className="font-bold text-white truncate block mt-0.5">
-                  {trustedLocation?.oblast || 'Визначається...'}
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ТРИВОГА ДЛЯ ВАС:</span>
-                <span className={'font-mono font-bold mt-0.5 block ' + (isUnderOfficialAlert ? 'text-rose-400' : 'text-emerald-400')}>
-                  {isUnderOfficialAlert ? '🔴 АКТИВНА' : '🟢 ВІДСУТНЯ'}
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">MATCHED GEOMETRIES:</span>
-                <span className={'font-mono font-bold mt-0.5 block ' + (officialGeometryDiagnostic.unmatchedGeometryCount ? 'text-amber-400' : 'text-emerald-400')}>
-                  {officialGeometryDiagnostic.matchedGeometryCount}
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">СИНХРОНІЗАЦІЯ МАПИ:</span>
-                <span className="font-mono font-bold text-emerald-400 mt-0.5 block truncate">
-                  {mapUpdatedIso ? new Date(mapUpdatedIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'СИНХРОНІЗОВАНО'}
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">UNMATCHED GEOMETRIES:</span>
-                <span className={'font-mono font-bold mt-0.5 block ' + (officialGeometryDiagnostic.unmatchedGeometryCount ? 'text-red-400' : 'text-emerald-400')}>
-                  {officialGeometryDiagnostic.unmatchedGeometryCount}
-                </span>
-              </div>
-              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">RENDERED POLYGONS:</span>
-                <span className="font-mono font-bold text-cyan-300 mt-0.5 block">
-                  {officialGeometryDiagnostic.renderedGeometryCount}
-                </span>
-              </div>
-            </div>
-
-            {officialGeometryDiagnostic.unmatched.length > 0 && (
-              <div className="p-2 rounded-xl bg-red-950/70 border border-red-800 space-y-1">
-                <p className="text-[10px] font-bold text-red-300">Незіставлені official zones:</p>
-                {officialGeometryDiagnostic.unmatched.map(zone => (
-                  <p key={`${zone.type}:${zone.sourceId}`} className="text-[10px] font-mono text-red-200">
-                    {zone.name} · {officialLocationTypeLabel(zone.type)} · ID {zone.sourceId}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            {activeOfficialAlerts.length > 0 && (
-              <div className="max-h-44 overflow-y-auto rounded-xl border border-rose-950 bg-black/30 p-2 space-y-1">
-                <p className="text-[10px] font-bold text-slate-300">Активні зони source → geometry → map</p>
-                {activeOfficialAlerts.map(alert => {
-                  const match = officialGeometryDiagnostic.matches.find(item => item.sourceId === String(alert.location_uid) && item.type === alert.location_type);
-                  return (
-                    <div key={`${alert.location_type}:${alert.location_uid}`} className="grid grid-cols-[1fr_auto] gap-2 text-[9px] font-mono text-slate-300">
-                      <span className="truncate">{alert.location_title} · {officialLocationTypeLabel(alert.location_type)} · ID {alert.location_uid}</span>
-                      <span className={match?.matched ? 'text-emerald-400' : 'text-red-400'}>{match?.matched ? 'YES' : 'NO'}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-rose-950/80">
-              * Офіційна сирена тривоги є фоновим інформаційним шаром і не переводить ваш локальний сектор у RED без виявлення тактичної рухомої цілі.
-            </p>
-          </div>
-
-          {/* SECTION 5: INGESTION DIAGNOSTICS & SOURCE HEALTH */}
-          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Контроль джерел & Діагностика</span>
-              </span>
-              <span className={'text-[9px] font-mono px-2 py-0.5 rounded border ' + (
-                evaluation?.monitoringHealth === 'OK'
-                  ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800'
-                  : evaluation?.monitoringHealth === 'DEGRADED'
-                  ? 'text-amber-400 bg-amber-950/80 border-amber-800'
-                  : 'text-slate-300 bg-slate-800 border-slate-700'
-              )}>
-                {evaluation?.monitoringHealth === 'OK' ? 'HEALTHY' : evaluation?.monitoringHealth === 'DEGRADED' ? 'DEGRADED' : 'INCOMPLETE'}
-              </span>
-            </div>
-
-            {/* 1. TOP CARD: LAST FULL SYNCHRONIZATION */}
-            <div className="p-3 rounded-xl bg-[#070a10] border border-cyan-900/60 space-y-1.5 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-slate-200 truncate">
-                  Остання повна синхронізація:
-                </span>
-                <span className="font-mono font-bold text-cyan-300 text-xs shrink-0">
-                  {lastFullSyncTime ? formatTimeHHMMSS(lastFullSyncTime) : 'Очікування'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-[10px] pt-1 border-t border-cyan-950/80">
-                <span className="text-slate-400">Свіжість синхронізації:</span>
-                <span className={'font-mono font-bold ' + (fullSyncFreshness.isStale ? 'text-amber-400' : 'text-emerald-400')}>
-                  {fullSyncFreshness.text}
-                </span>
-              </div>
-              {fullSyncFreshness.isStale && lastFullSyncTime && (
-                <div className="text-[10px] text-amber-300 bg-amber-950/60 border border-amber-800/80 rounded-lg px-2 py-1 flex items-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                  <span>⚠️ Останні успішні дані: {formatTimeHHMMSS(lastFullSyncTime)}</span>
-                </div>
-              )}
-              <p className="text-[9px] text-slate-500 italic">
-                * Час фактичного успішного завершення перевірки основних джерел, а не frontend refresh
-              </p>
-            </div>
-
-            {/* OVERALL MONITORING HEALTH SUMMARY */}
-            <div className="p-2.5 rounded-xl bg-[#070a10] border border-slate-800 space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 font-semibold">Загальний моніторинг:</span>
-                <span className={'font-bold font-mono ' + (
-                  evaluation?.monitoringHealth === 'OK'
-                    ? 'text-emerald-400'
-                    : evaluation?.monitoringHealth === 'DEGRADED'
-                    ? 'text-amber-400'
-                    : 'text-rose-400'
-                )}>
-                  {evaluation?.monitoringHealth === 'OK' ? '🟢 OK (Повний захист)' : evaluation?.monitoringHealth === 'DEGRADED' ? '🟠 DEGRADED (Частково)' : '⚪ INCOMPLETE (Неповний)'}
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 leading-snug">
-                {evaluation?.monitoringHealthReasonUk || 'Ініціалізація системи перевірки джерел...'}
-              </p>
-            </div>
-
-            {/* 1.5 USER PRIORITY CHANNELS & MULTI-READER BLOCK */}
-            <div className="p-3 rounded-xl bg-[#070a10] border border-amber-500/40 space-y-2.5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-200 flex items-center gap-1.5">
-                  <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                  <span>USER PRIORITY ДЖЕРЕЛА</span>
-                </span>
-                <span className="text-[10px] font-mono text-amber-300 font-bold px-2 py-0.5 rounded bg-amber-950/80 border border-amber-800/80">
-                  {userPriorityHealthyCount}/{userPriorityTotalCount} ЧИТАЮТЬСЯ
-                </span>
-              </div>
-
-              {/* 4 KEY METRICS */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-center text-[10px]">
-                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block font-mono text-[9px]">USER PRIORITY</span>
-                  <span className="font-bold text-amber-300 text-xs mt-0.5 block">{userPriorityTotalCount}</span>
-                </div>
-                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block font-mono text-[9px]">РЕАЛЬНО ЧИТАЮТЬСЯ</span>
-                  <span className="font-bold text-emerald-400 text-xs mt-0.5 block">{userPriorityHealthyCount}</span>
-                </div>
-                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block font-mono text-[9px]">FALLBACK READER</span>
-                  <span className="font-bold text-cyan-300 text-xs mt-0.5 block">{userPriorityFallbackCount}</span>
-                </div>
-                <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block font-mono text-[9px]">НЕ ВДАЛОСЯ ПРОЧИТАТИ</span>
-                  <span className={'font-bold text-xs mt-0.5 block ' + (userPriorityFailedCount > 0 ? 'text-rose-400' : 'text-slate-400')}>
-                    {userPriorityFailedCount}
-                  </span>
-                </div>
-              </div>
-
-              {/* USER PRIORITY CHANNELS LIST WITH ACTIVE READER AND LAST READ TIME */}
-              <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 text-[10px]">
-                {userPriorityChannelList.map((ch) => {
-                  const cleanU = ch.username.toLowerCase().replace(/^@/, '');
-                  const st = sourceStatuses[cleanU];
-                  const isHealthy = st?.statusCategory === 'healthy' || (st && st.ok);
-                  const isFallback = st?.isFallbackActive;
-                  const activeReader = st?.activeReader || 'Jina Proxy';
-                  const lastReadTime = st?.lastSuccessfulReadTs ? formatTimeHHMMSS(st.lastSuccessfulReadTs) : '—';
-                  const lastMsgTime = st?.lastMessageTimeIso ? formatTimeHHMMSS(st.lastMessageTimeIso) : '—';
-
-                  return (
-                    <div key={ch.username} className="bg-black/40 p-2 rounded-lg border border-amber-950/80 flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleUserPriority(ch.username)}
-                            className="text-amber-400 hover:text-amber-300 text-xs shrink-0"
-                            title="Зняти пріоритет"
-                          >
-                            ★
-                          </button>
-                          <span className="font-bold text-slate-200 truncate">@{ch.username}</span>
-                          <span className={'text-[8px] font-mono px-1.5 py-0.2 rounded font-bold border ' + (
-                            isHealthy
-                              ? (isFallback ? 'bg-cyan-950 text-cyan-300 border-cyan-800' : 'bg-emerald-950 text-emerald-300 border-emerald-800')
-                              : 'bg-rose-950 text-rose-300 border-rose-800'
-                          )}>
-                            {isHealthy ? (isFallback ? 'FALLBACK' : 'ONLINE') : 'OFFLINE'}
-                          </span>
-                        </div>
-                        <p className="text-[9px] text-slate-400 truncate mt-0.5">{ch.title}</p>
-                        {st?.lastMessageText && (
-                          <p className="text-[9px] text-slate-300/80 truncate italic mt-0.5">
-                            "{st.lastMessageText.slice(0, 60)}..."
-                          </p>
-                        )}
-                        <div className="flex items-center gap-3 text-[8px] text-slate-500 font-mono mt-1 flex-wrap">
-                          <span>Рідер: <strong className="text-cyan-300">{activeReader}</strong></span>
-                          <span>Успішний read: <strong className="text-slate-300">{lastReadTime}</strong></span>
-                          <span>Повідомлення: <strong className="text-slate-300">{lastMsgTime}</strong></span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* SOURCE BREAKDOWN CARDS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
-              {/* 2. TELEGRAM CARD */}
-              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-1">
-                  <span className="text-slate-300 font-mono font-bold text-[10px]">
-                    📡 TELEGRAM
-                  </span>
-                  <span className={'text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ' + (
-                    tgStatusLabel === 'ONLINE'
-                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                      : tgStatusLabel === 'DEGRADED'
-                      ? 'bg-amber-950 text-amber-300 border-amber-800'
-                      : 'bg-red-950 text-red-300 border-red-800'
-                  )}>
-                    {tgStatusLabel}
-                  </span>
-                </div>
-
-                <div className="space-y-1 text-slate-300">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Останній успішний цикл:</span>
-                    <span className="font-mono font-bold text-cyan-300">
-                      {lastTelegramCycleTime ? formatTimeHHMMSS(lastTelegramCycleTime) : '—'}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Останнє отримане повідомлення:</span>
-                    <span className="font-mono font-bold text-white">
-                      {lastTelegramMessageTime ? formatTimeHHMMSS(lastTelegramMessageTime) : '—'}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Свіжість:</span>
-                    <span className={'font-mono font-bold ' + (tgCycleFreshness.isStale ? 'text-amber-400' : 'text-emerald-400')}>
-                      {tgCycleFreshness.text}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Healthy:</span>
-                    <span className="font-mono font-bold text-emerald-400">
-                      {tgHealthyCount}/{tgMonitoredCount}
-                    </span>
-                  </div>
-                </div>
-
-                {tgCycleFreshness.isStale && lastTelegramCycleTime && (
-                  <div className="text-[9px] text-amber-300 bg-amber-950/70 border border-amber-800 rounded px-1.5 py-0.5 mt-1">
-                    ⚠️ Останні успішні дані: {formatTimeHHMMSS(lastTelegramCycleTime)}
-                  </div>
-                )}
-
-                <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
-                  <span>⭐ Пріоритетні: <strong className="text-amber-300">{evaluation?.monitoringStats?.userPriorityHealthy ?? sourcesHealth?.userPriorityHealthy ?? 11}/{evaluation?.monitoringStats?.userPriorityTotal ?? sourcesHealth?.userPriorityTotal ?? 11}</strong></span>
-                  <span>⚡ Core: <strong className="text-amber-400">{evaluation?.monitoringStats?.criticalHealthy ?? sourcesHealth?.criticalHealthy ?? 25}/{evaluation?.monitoringStats?.criticalTotal ?? sourcesHealth?.criticalTotal ?? 25}</strong></span>
-                </div>
-              </div>
-
-              {/* 3. OFFICIAL ALERTS CARD */}
-              <div className="bg-[#070a10] p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-1">
-                  <span className="text-slate-300 font-mono font-bold text-[10px]">
-                    🚨 OFFICIAL ALERTS
-                  </span>
-                  <span className={'text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ' + (
-                    officialStatusLabel === 'ONLINE'
-                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                      : officialStatusLabel === 'DEGRADED'
-                      ? 'bg-amber-950 text-amber-300 border-amber-800'
-                      : 'bg-red-950 text-red-300 border-red-800'
-                  )}>
-                    {officialStatusLabel}
-                  </span>
-                </div>
-
-                <div className="space-y-1 text-slate-300">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Останній успішний fetch:</span>
-                    <span className="font-mono font-bold text-cyan-300">
-                      {lastOfficialFetchTime ? formatTimeHHMMSS(lastOfficialFetchTime) : (alertsDiagnostic.receivedByAgentIso ? formatTimeHHMMSS(alertsDiagnostic.receivedByAgentIso) : '—')}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Час даних source:</span>
-                    <span className="font-mono font-bold text-white truncate max-w-[85px]">
-                      {alertsDiagnostic.sourceUpdatedIso ? formatTimeHHMMSS(alertsDiagnostic.sourceUpdatedIso) : '—'}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Свіжість:</span>
-                    <span className={'font-mono font-bold ' + (officialFetchFreshness.isStale ? 'text-amber-400' : 'text-emerald-400')}>
-                      {officialFetchFreshness.text}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">Статус API:</span>
-                    <span className={'font-mono font-bold ' + (alertsDiagnostic.status === 'OK' ? 'text-emerald-400' : 'text-rose-400')}>
-                      {alertsDiagnostic.status === 'OK' ? 'ONLINE' : 'ERROR'}
-                    </span>
-                  </div>
-                </div>
-
-                {officialFetchFreshness.isStale && (lastOfficialFetchTime || alertsDiagnostic.lastSuccessfulFetchTs) && (
-                  <div className="text-[9px] text-amber-300 bg-amber-950/70 border border-amber-800 rounded px-1.5 py-0.5 mt-1">
-                    ⚠️ Останні успішні дані: {formatTimeHHMMSS(lastOfficialFetchTime || alertsDiagnostic.lastSuccessfulFetchTs)}
-                  </div>
-                )}
-
-                <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[9px] text-slate-400">
-                  <span>Активні зони: <strong className="text-rose-300">{activeOfficialAlertsCount}</strong></span>
-                  <span>Шар WGS84: <strong className="text-cyan-300">{officialGeometryDiagnostic.renderedGeometryCount}</strong></span>
-                </div>
-              </div>
-            </div>
-
-            {/* TELEMETRY METRICS GRID */}
-            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block font-mono">ПРЯМІ ЗАГРОЗИ</span>
-                <span className="font-mono font-bold text-red-400">
-                  {evaluation?.threatsCount ?? 0}
-                </span>
-              </div>
-              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block font-mono">СПОСТЕРЕЖЕННЯ</span>
-                <span className="font-mono font-bold text-amber-300">
-                  {(evaluation?.observationsCount ?? 0) + (evaluation?.outsideZoneObservationsCount ?? 0)}
-                </span>
-              </div>
-              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block font-mono">ВІДХИЛЕНО ПОВІДОМЛЕНЬ</span>
-                <span className="font-mono font-bold text-slate-300">
-                  {evaluation?.rejectedCount ?? 0}
-                </span>
-              </div>
-              <div className="bg-[#070a10] p-2 rounded-lg border border-slate-800">
-                <span className="text-slate-400 block font-mono">НЕРОЗПІЗНАНА ГЕОГРАФІЯ</span>
-                <span className="font-mono font-bold text-amber-400">
-                  {evaluation?.geoUnresolvedCount ?? 0}
-                </span>
-              </div>
-            </div>
-
-            {/* LAST REFRESH DIAGNOSTICS CARD */}
-            {lastRefreshDiagnostics && (
-              <div className="p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-800/60 space-y-1.5 text-[10px]">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-cyan-300 flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3" />
-                    <span>Останній ручний Refresh:</span>
-                  </span>
-                  <span className={'font-mono font-bold px-1.5 py-0.5 rounded ' + (
-                    lastRefreshDiagnostics.status === 'full'
-                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                      : lastRefreshDiagnostics.status === 'partial'
-                      ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                      : 'bg-red-950 text-red-300 border border-red-800'
-                  )}>
-                    {lastRefreshDiagnostics.status === 'full' ? 'FULL ✓' : lastRefreshDiagnostics.status === 'partial' ? 'PARTIAL ⚠️' : 'TIMEOUT ⏱️'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-1 text-slate-300">
-                  <div>Тривалість: <span className="font-mono font-bold text-white">{(lastRefreshDiagnostics.durationMs / 1000).toFixed(1)}с</span> <span className="text-slate-500 font-mono">(max 30с)</span></div>
-                  <div>Успішно: <span className="font-mono font-bold text-emerald-400">{lastRefreshDiagnostics.successfulSources}/{lastRefreshDiagnostics.totalSources}</span></div>
-                  <div>Таймаути: <span className="font-mono font-bold text-amber-400">{lastRefreshDiagnostics.timeoutSources}</span></div>
-                  <div>Помилки: <span className="font-mono font-bold text-rose-400">{lastRefreshDiagnostics.failedSources}</span></div>
-                </div>
-                <div className="pt-1 border-t border-cyan-900/60 flex items-center justify-between text-[9px] text-slate-400 font-mono">
-                  <span>Priority: {lastRefreshDiagnostics.stageProgress.userPriority === 'done' ? '✓' : '⚠️'}</span>
-                  <span>Critical: {lastRefreshDiagnostics.stageProgress.critical === 'done' ? '✓' : '⚠️'}</span>
-                  <span>Alerts: {lastRefreshDiagnostics.stageProgress.officialAlerts === 'done' ? '✓' : '⚠️'}</span>
-                  <span>Other: {lastRefreshDiagnostics.stageProgress.otherSources === 'done' ? '✓' : '⚠️'}</span>
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={() => setShowRejectedModal(true)}
-              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 transition-all shadow-sm"
-            >
-              <Search className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Переглянути відхилені повідомлення ({evaluation?.rejectedMessagesLog?.length ?? 0})</span>
-            </button>
-          </div>
-
-          {/* SECTION 6: SOURCES & CUSTOM CHANNELS */}
-          <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-blue-400" />
-                <span>Каталог джерел ({allSources.length})</span>
-              </span>
-              <button
-                onClick={() => setShowFlugerModal(true)}
-                className="text-[10px] text-cyan-400 underline font-semibold"
-              >
-                Про «Флюгер»
-              </button>
-            </div>
-
-            {/* CUSTOM CHANNELS ADDER */}
-            <div>
-              <span className="text-slate-400 text-[11px] font-semibold block mb-1.5">Додати власний канал:</span>
+            {/* Додати канал */}
+            <div className="space-y-1.5">
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <span className="absolute left-3 top-2 text-slate-500 text-xs font-mono">@</span>
+                  <span className="absolute left-3 top-2.5 text-slate-500 text-xs font-mono">@</span>
                   <input
                     type="text"
                     value={newChannelInput}
                     onChange={(e) => setNewChannelInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleAddCustomChannel()}
-                    placeholder="username (напр. tlknews)"
-                    className="w-full bg-[#070a10] border border-slate-700 rounded-xl pl-7 pr-3 py-1.5 text-xs text-white placeholder-slate-500 font-mono"
+                    placeholder="новий_канал"
+                    className="w-full bg-[#070a10] border border-slate-700/80 rounded-xl pl-7 pr-3 py-2 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
                 <button
+                  type="button"
                   onClick={() => handleAddCustomChannel()}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1 shrink-0"
                 >
-                  +
+                  <span>+ Додати</span>
                 </button>
               </div>
 
               {channelAddMessage && (
-                <p className="mt-1 text-[10px] text-emerald-400">{channelAddMessage}</p>
-              )}
-
-              {customChannels.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {customChannels.map((c) => (
-                    <span
-                      key={c.username}
-                      className="inline-flex items-center gap-1 bg-blue-950/80 text-blue-300 text-[10px] font-mono px-2 py-0.5 rounded border border-blue-800"
-                    >
-                      <span>@{c.username}</span>
-                      <button onClick={() => handleRemoveCustomChannel(c.username)} className="text-red-400 font-bold">×</button>
-                    </span>
-                  ))}
-                </div>
+                <p className="text-[11px] text-emerald-400 px-1 font-medium">{channelAddMessage}</p>
               )}
             </div>
 
-            {/* CHANNELS LIST WITH CLEAR REASON */}
-            <div className="max-h-48 overflow-y-auto space-y-1 text-[11px] pr-1">
+            {/* Список каналів */}
+            <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
               {allSources.map((s) => {
-                const st = sourceStatuses[s.username];
-                const isHealthy = st?.statusCategory === 'healthy' || (st && st.ok);
-                const isDisabled = st?.statusCategory === 'disabled' || s.hasWebPreview === false || s.enabled === false;
-                const isUnavailable = !isHealthy && !isDisabled;
                 const isUserPriority = s.tier === 'USER_PRIORITY';
-                const isCritical = s.tier === 'CRITICAL';
+                const isCustom = customChannels.some(c => c.username.toLowerCase() === s.username.toLowerCase());
 
                 return (
-                  <div key={s.username} className={`flex items-center justify-between p-2 rounded ${isUserPriority ? 'bg-amber-950/20 border border-amber-800/40' : 'bg-[#070a10] border border-slate-800'}`}>
-                    <div className="min-w-0 pr-2 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleUserPriority(s.username)}
-                          className={`p-0.5 rounded text-xs transition-all ${isUserPriority ? 'text-amber-400 hover:text-amber-300 font-bold' : 'text-slate-600 hover:text-amber-400'}`}
-                          title={isUserPriority ? '★ Зняти пріоритет' : '☆ Зробити USER PRIORITY'}
-                        >
-                          {isUserPriority ? '★' : '☆'}
-                        </button>
-                        <span className={'w-2 h-2 rounded-full shrink-0 ' + (
-                          isHealthy ? 'bg-emerald-400' :
-                          isDisabled ? 'bg-slate-600' :
-                          'bg-amber-500'
-                        )} />
-                        <span className="text-slate-200 font-semibold truncate">@{s.username}</span>
-                        {isUserPriority && (
-                          <span className="text-[8px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-amber-600/50 flex items-center gap-0.5">
-                            ⭐ USER PRIORITY
-                          </span>
-                        )}
-                        {isCritical && (
-                          <span className="text-[8px] bg-red-950/80 text-rose-300 font-mono px-1 rounded border border-rose-800">
-                            CORE
-                          </span>
-                        )}
-                        <span className="text-[8px] text-slate-500 font-mono">
-                          {isUserPriority || isCritical ? '• Кожен цикл' : '• Ротація'}
-                        </span>
+                  <div
+                    key={s.username}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                      isUserPriority
+                        ? 'bg-amber-950/20 border-amber-800/40'
+                        : 'bg-[#070a10] border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleUserPriority(s.username)}
+                        className={`text-sm p-1 rounded transition-transform active:scale-125 ${
+                          isUserPriority
+                            ? 'text-amber-400 font-black'
+                            : 'text-slate-600 hover:text-amber-400'
+                        }`}
+                        title={isUserPriority ? 'Зняти пріоритет' : 'Встановити ★ USER PRIORITY'}
+                      >
+                        {isUserPriority ? '★' : '☆'}
+                      </button>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-200 truncate">@{s.username}</span>
+                          {isUserPriority && (
+                            <span className="text-[9px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-600/40 shrink-0">
+                              ★ USER PRIORITY
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 truncate">{s.title}</p>
                       </div>
-                      <p className="text-[10px] text-slate-400 truncate mt-0.5">{s.title}</p>
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className={'text-[9px] font-mono ' + (
-                        isHealthy ? 'text-emerald-400' :
-                        isDisabled ? 'text-slate-500' :
-                        'text-amber-400'
-                      )}>
-                        {isHealthy ? (st?.isFallbackActive ? 'FALLBACK' : 'АКТИВНИЙ') : isDisabled ? 'БЕЗ ПРЕВ’Ю' : 'ТИМЧАСОВО ОФЛАЙН'}
-                      </span>
-                      {st?.error && !isHealthy && (
-                        <span className="text-[8px] font-mono text-slate-500 block truncate max-w-[120px]">
-                          {st.error}
-                        </span>
-                      )}
-                      {st?.lastMessageTimeIso && isHealthy && (
-                        <span className="text-[9px] font-mono text-slate-400 block">
-                          {new Date(st.lastMessageTimeIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      )}
-                    </div>
+
+                    {/* Delete button (if custom channel) */}
+                    {isCustom && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomChannel(s.username)}
+                        className="text-rose-400 hover:text-rose-300 text-xs px-2 py-1 rounded-lg hover:bg-rose-950/50 transition-all shrink-0 font-medium"
+                        title="Видалити доданий канал"
+                      >
+                        Видалити
+                      </button>
+                    )}
                   </div>
                 );
               })}
             </div>
+          </div>
+
+          {/* 5. 🚨 TEST DANGER */}
+          <div className="mb-4">
+            <button
+              type="button"
+              disabled={testThreatLoading || lockScreenCountdown > 0}
+              onClick={handleSendTestThreatPush}
+              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-950/40 active:scale-[0.98] transition-all disabled:opacity-60"
+            >
+              <ShieldAlert className="w-5 h-5 animate-pulse" />
+              <span>
+                {lockScreenCountdown > 0
+                  ? `ТЕСТ НАДІСЛАНО (${lockScreenCountdown}с) — ЗАБЛОКУЙТЕ ЕКРАН`
+                  : testThreatLoading
+                  ? 'ЗВ’ЯЗОК ІЗ СЕРВЕРОМ...'
+                  : '🚨 TEST DANGER'}
+              </span>
+            </button>
+
+            {lockScreenCountdown > 0 && (
+              <div className="mt-2 p-3 bg-amber-950/80 border border-amber-600 rounded-xl text-center space-y-1 animate-pulse">
+                <p className="text-amber-200 font-bold text-xs">
+                  «Тест надіслано. Заблокуйте iPhone.»
+                </p>
+                <p className="text-amber-300 text-[10px] font-mono">
+                  Сповіщення надійде через {lockScreenCountdown} сек.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* ВНИЗУ ОДИН СТАТУС: 🟢 Система працює / 🔴 Потрібна увага -> по натисканню відкривається «Технічна діагностика» */}
+          <div className="mt-6 pt-2 border-t border-slate-800/80">
+            <details className="group">
+              <summary className="list-none cursor-pointer select-none">
+                <div className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all ${
+                  (backendServerOnline !== false && !webPushNeedsSync && (!alertsDiagnostic.isStale || alertsDiagnostic.sourceOnline))
+                    ? 'bg-emerald-950/30 border-emerald-800/60 hover:bg-emerald-950/50'
+                    : 'bg-rose-950/30 border-rose-800/60 hover:bg-rose-950/50'
+                }`}>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-base">
+                      {(backendServerOnline !== false && !webPushNeedsSync && (!alertsDiagnostic.isStale || alertsDiagnostic.sourceOnline)) ? '🟢' : '🔴'}
+                    </span>
+                    <div>
+                      <span className={`text-xs font-black tracking-wide ${
+                        (backendServerOnline !== false && !webPushNeedsSync && (!alertsDiagnostic.isStale || alertsDiagnostic.sourceOnline))
+                          ? 'text-emerald-300'
+                          : 'text-rose-300'
+                      }`}>
+                        {(backendServerOnline !== false && !webPushNeedsSync && (!alertsDiagnostic.isStale || alertsDiagnostic.sourceOnline))
+                          ? 'Система працює'
+                          : 'Потрібна увага'}
+                      </span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {(backendServerOnline !== false && !webPushNeedsSync && (!alertsDiagnostic.isStale || alertsDiagnostic.sourceOnline))
+                          ? 'Всі компоненти активні'
+                          : 'Натисніть для перевірки деталей'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-slate-400 text-xs font-semibold group-open:text-blue-400">
+                    <span>Технічна діагностика</span>
+                    <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                  </div>
+                </div>
+              </summary>
+
+              {/* РОЗКРИВНА СЕКЦІЯ: ТЕХНІЧНА ДІАГНОСТИКА */}
+              <div className="mt-3 p-4 bg-[#080d16] border border-slate-800 rounded-2xl space-y-4 text-xs">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <span>Технічна діагностика системи</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleManualDataRefresh}
+                    disabled={isManualRefreshing}
+                    className="text-[10px] font-mono text-cyan-300 font-bold px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-700 flex items-center gap-1 hover:bg-cyan-900 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                    <span>{isManualRefreshing ? 'ОНОВЛЕННЯ...' : 'ОНОВИТИ'}</span>
+                  </button>
+                </div>
+
+                {/* 1. БЕКЕНД ТА ХМАРА */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">Бекенд та хмарні сервіси</span>
+                  <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">CLOUDFLARE 24/7:</span>
+                      <span className={`font-bold mt-0.5 block ${backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400'}`}>
+                        {backendServerOnline === true ? '🟢 ONLINE' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
+                      </span>
+                    </div>
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">GITHUB SCHEDULER:</span>
+                      <span className="font-bold text-emerald-400 mt-0.5 block">🟢 ACTIVE ($0)</span>
+                    </div>
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">WEB PUSH (VAPID):</span>
+                      <span className={`font-bold mt-0.5 block ${isWebPushSubscribed && !webPushNeedsSync ? 'text-emerald-400' : webPushNeedsSync ? 'text-amber-400' : 'text-slate-400'}`}>
+                        {isWebPushSubscribed && !webPushNeedsSync ? '🟢 ACTIVE' : webPushNeedsSync ? '🟡 NEEDS SYNC' : '⚪ OFF'}
+                      </span>
+                    </div>
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">QUICK TUNNEL / CORS:</span>
+                      <span className="font-bold text-slate-400 mt-0.5 block">⚪ NOT NEEDED (DIRECT)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. ДЖЕРЕЛА ТА ALERTS.IN.UA */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">Джерела alerts.in.ua & Telegram</span>
+                    <button
+                      type="button"
+                      onClick={handleOfficialAlertsRefresh}
+                      disabled={isRefreshingOfficial}
+                      className="text-[9px] font-mono text-rose-300 underline"
+                    >
+                      {isRefreshingOfficial ? 'Fetch...' : 'Fetch Official'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">ALERTS.IN.UA STATUS:</span>
+                      <span className={`font-bold mt-0.5 block font-mono ${alertsDiagnostic.sourceOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {alertsDiagnostic.sourceOnline ? '🟢 ONLINE' : '🔴 OFFLINE'}
+                      </span>
+                    </div>
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">LATENCY (ВІК ДАНИХ):</span>
+                      <span className={`font-bold mt-0.5 block font-mono ${alertsDiagnostic.isStale ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {officialSnapshotAgeSec} с
+                      </span>
+                    </div>
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">WGS84 ПОЛІГОНИ:</span>
+                      <span className="font-bold text-cyan-300 mt-0.5 block font-mono">
+                        {officialGeometryDiagnostic.renderedGeometryCount} рендер / {activeOfficialAlertsCount} зон
+                      </span>
+                    </div>
+                    <div className="bg-black/50 p-2 rounded-lg border border-slate-800">
+                      <span className="text-slate-400 block font-mono text-[9px]">TELEGRAM КАНАЛИ:</span>
+                      <span className="font-bold text-emerald-400 mt-0.5 block font-mono">
+                        {tgHealthyCount}/{tgMonitoredCount} online
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. ГОЛОС ТА ЗВУК */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">Голос та звук сирени</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAudio()}
+                      className={`flex-1 py-1.5 px-2 rounded-lg font-bold text-[10px] border transition-all ${
+                        audioEnabled ? 'bg-blue-950/80 text-blue-300 border-blue-800' : 'bg-slate-900 text-slate-400 border-slate-800'
+                      }`}
+                    >
+                      Голос диктора: {audioEnabled ? '🔊 УВІМК' : '🔇 ВИМК'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleManualVoiceTest}
+                      className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-bold text-[10px] border border-slate-700"
+                    >
+                      Тест голосу 🔊
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNativeSoundPreview}
+                      className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-lg font-bold text-[10px] border border-slate-700"
+                    >
+                      Звук сирени 🚨
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. ДОДАТКОВІ ІНСТРУМЕНТИ */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setShowRejectedModal(true)}
+                    className="text-cyan-400 hover:text-cyan-300 underline font-mono"
+                  >
+                    Відхилені повідомлення ({evaluation?.rejectedMessagesLog?.length ?? 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFlugerModal(true)}
+                    className="text-slate-400 hover:text-slate-300 underline"
+                  >
+                    Методологія «Флюгер»
+                  </button>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
 
