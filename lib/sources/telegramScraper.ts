@@ -990,40 +990,22 @@ export const TELEGRAM_READERS: TelegramReader[] = [
     isBrowserSupported: true,
   },
   {
-    id: 'corsproxy_io',
-    name: 'CorsProxy.io',
-    buildUrl: (u) => `https://corsproxy.io/?url=${encodeURIComponent('https://t.me/s/' + u)}`,
-    headers: () => ({
-      'Accept': 'text/html'
-    }),
-    isBrowserSupported: true,
-  },
-  {
-    id: 'codetabs_proxy',
-    name: 'CodeTabs Proxy',
-    buildUrl: (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent('https://t.me/s/' + u)}`,
-    headers: () => ({
-      'Accept': 'text/html'
-    }),
-    isBrowserSupported: true,
-  },
-  {
-    id: 'allorigins_raw',
-    name: 'AllOrigins Raw',
-    buildUrl: (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent('https://t.me/s/' + u)}`,
-    headers: () => ({
-      'Accept': 'text/html'
-    }),
-    isBrowserSupported: true,
-  },
-  {
-    id: 'widget_embed',
-    name: 'Telegram Widget Embed',
+    id: 'jina_embed',
+    name: 'Jina Widget Embed',
     buildUrl: (u) => `https://r.jina.ai/https://t.me/${u}?embed=1`,
     headers: (opts) => ({
       'x-return-format': 'html',
       'Accept': 'text/html',
       ...(opts?.force ? { 'X-No-Cache': 'true', 'X-Cache-Tolerance': '0' } : {})
+    }),
+    isBrowserSupported: true,
+  },
+  {
+    id: 'allorigins_json',
+    name: 'AllOrigins API',
+    buildUrl: (u) => `https://api.allorigins.win/get?url=${encodeURIComponent('https://t.me/s/' + u)}`,
+    headers: () => ({
+      'Accept': 'application/json'
     }),
     isBrowserSupported: true,
   },
@@ -1266,7 +1248,15 @@ export async function fetchChannelMessages(
       }
 
       if (res.ok) {
-        const html = await res.text();
+        let html = await res.text();
+        if (html.trim().startsWith('{') && html.includes('"contents"')) {
+          try {
+            const parsed = JSON.parse(html);
+            if (parsed.contents) {
+              html = parsed.contents;
+            }
+          } catch (e) {}
+        }
         const messages = parseTelegramHtml(html, channel);
 
         if (messages.length > 0) {
@@ -1376,8 +1366,8 @@ export async function fetchAllTelegramFeeds(
   let timeoutSourcesCount = 0;
   let failedSourcesCount = 0;
 
-  const fetchChannelTier = async (channels: ChannelConfig[]) => {
-    for (let i = 0; i < channels.length; i += CONCURRENCY) {
+  const fetchChannelTier = async (channels: ChannelConfig[], concurrency = 4, delayMs = 30) => {
+    for (let i = 0; i < channels.length; i += concurrency) {
       if (options?.signal?.aborted) {
         for (let j = i; j < channels.length; j++) {
           const ch = channels[j];
@@ -1414,7 +1404,7 @@ export async function fetchAllTelegramFeeds(
         break;
       }
 
-      const chunk = channels.slice(i, i + CONCURRENCY);
+      const chunk = channels.slice(i, i + concurrency);
       const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch, options)));
 
       chunkResults.forEach((res, idx) => {
@@ -1472,23 +1462,23 @@ export async function fetchAllTelegramFeeds(
         }
       });
 
-      if (i + CONCURRENCY < channels.length && !options?.signal?.aborted) {
-        await new Promise(r => setTimeout(r, 30));
+      if (i + concurrency < channels.length && !options?.signal?.aborted) {
+        await new Promise(r => setTimeout(r, delayMs));
       }
     }
   };
 
-  // 1. TIER 1: USER PRIORITY FIRST
-  await fetchChannelTier(userPriorityChannels);
+  // 1. TIER 1: USER PRIORITY FIRST (concurrency 2, 400ms pacing to preserve Jina IP rate limits)
+  await fetchChannelTier(userPriorityChannels, 2, 400);
 
-  // 2. TIER 2: CRITICAL SECOND
+  // 2. TIER 2: CRITICAL SECOND (concurrency 4, 30ms)
   if (!options?.signal?.aborted) {
-    await fetchChannelTier(criticalChannels);
+    await fetchChannelTier(criticalChannels, 4, 30);
   }
 
   // 3. TIER 3: REGIONAL BATCH THIRD
   if (!options?.signal?.aborted) {
-    await fetchChannelTier(selectedBatch);
+    await fetchChannelTier(selectedBatch, 4, 30);
   }
 
   // Populate remaining regional channels from cache

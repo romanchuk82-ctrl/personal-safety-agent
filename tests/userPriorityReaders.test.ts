@@ -120,17 +120,17 @@ test('Multi-Reader Fallback: automatically fails over when primary reader errors
   };
 
   try {
-    // Mock fetch: fail on first reader (r.jina.ai), succeed on second reader (corsproxy.io)
+    // Mock fetch: fail on first reader (t.me/s), succeed on second reader (embed=1)
     global.fetch = (async (url: any, opts: any) => {
       const urlStr = url.toString();
       fetchAttempts.push(urlStr);
 
-      if (urlStr.includes('r.jina.ai/https://t.me/s/')) {
+      if (urlStr.includes('t.me/s/')) {
         // Preferred reader fails with 502 Bad Gateway
         return new Response('Upstream error', { status: 502, statusText: 'Bad Gateway' });
       }
 
-      if (urlStr.includes('corsproxy.io')) {
+      if (urlStr.includes('embed=1')) {
         // Fallback reader succeeds
         const html = `
           <div class="tgme_widget_message" data-post="test_priority_chan/42">
@@ -153,20 +153,20 @@ test('Multi-Reader Fallback: automatically fails over when primary reader errors
     assert.strictEqual(result.messages.length, 1);
     assert.ok(result.messages[0].text.includes('Бориспіль'));
     assert.strictEqual(result.isFallback, true, 'isFallback flag should be true');
-    assert.strictEqual(result.readerUsed, 'CorsProxy.io');
+    assert.strictEqual(result.readerUsed, 'Jina Widget Embed');
 
     const state = channelReaderStates['test_priority_chan'];
     assert.ok(state, 'Reader state must be recorded for test_priority_chan');
     assert.strictEqual(state.preferredReader, 'jina_html');
-    assert.strictEqual(state.activeReader, 'corsproxy_io');
-    assert.strictEqual(state.fallbackReader, 'corsproxy_io');
+    assert.strictEqual(state.activeReader, 'jina_embed');
+    assert.strictEqual(state.fallbackReader, 'jina_embed');
     assert.ok(state.lastSuccessfulReadTs > 0);
     assert.strictEqual(state.failoverCount, 1);
 
     // Verify fetch attempts tried preferred reader first, then fallback
     assert.ok(fetchAttempts.length >= 2);
-    assert.ok(fetchAttempts[0].includes('r.jina.ai'));
-    assert.ok(fetchAttempts[1].includes('corsproxy.io'));
+    assert.ok(fetchAttempts[0].includes('t.me/s/'));
+    assert.ok(fetchAttempts[1].includes('embed=1'));
   } finally {
     global.fetch = originalFetch;
     __resetTelegramScraperStateForTests();
@@ -191,10 +191,10 @@ test('Multi-Reader Recovery: primary reader recovery clears fallback status', as
     // 1. Initial run: primary fails, fallback succeeds
     global.fetch = (async (url: any) => {
       const urlStr = url.toString();
-      if (urlStr.includes('r.jina.ai/https://t.me/s/')) {
+      if (urlStr.includes('t.me/s/')) {
         return new Response('HTTP 500 Server Error', { status: 500 });
       }
-      if (urlStr.includes('corsproxy.io')) {
+      if (urlStr.includes('embed=1')) {
         return new Response(`
           <div class="tgme_widget_message" data-post="test_recovery_chan/1">
             <div class="tgme_widget_message_text js-message_text">Повідомлення 1</div>
@@ -207,7 +207,7 @@ test('Multi-Reader Recovery: primary reader recovery clears fallback status', as
 
     const res1 = await fetchChannelMessages(dummyChannel, { force: true });
     assert.strictEqual(res1.isFallback, true);
-    assert.strictEqual(channelReaderStates['test_recovery_chan'].fallbackReader, 'corsproxy_io');
+    assert.strictEqual(channelReaderStates['test_recovery_chan'].fallbackReader, 'jina_embed');
 
     // 2. Second run: primary reader (jina_html) recovers!
     global.fetch = (async (url: any) => {
@@ -253,10 +253,10 @@ test('Diagnostics Metrics: calculates userPriority metrics accurately', async ()
         `, { status: 200 });
       }
       if (lowerUrl.includes('hajun_by')) {
-        if (lowerUrl.includes('r.jina.ai')) {
+        if (lowerUrl.includes('t.me/s/')) {
           return new Response('Error', { status: 500 });
         }
-        if (lowerUrl.includes('corsproxy.io')) {
+        if (lowerUrl.includes('embed=1')) {
           return new Response(`
             <div class="tgme_widget_message" data-post="Hajun_BY/1">
               <div class="tgme_widget_message_text js-message_text">Авіація активна</div>
@@ -292,7 +292,7 @@ test('Diagnostics Metrics: calculates userPriority metrics accurately', async ()
     const hajun = sourceStatus['hajun_by'];
     assert.strictEqual(hajun.ok, true);
     assert.strictEqual(hajun.isFallbackActive, true);
-    assert.strictEqual(hajun.fallbackReader, 'corsproxy_io');
+    assert.strictEqual(hajun.fallbackReader, 'jina_embed');
     assert.ok(hajun.lastSuccessfulReadTs! > 0);
 
     const tlk = sourceStatus['tlknews'];
