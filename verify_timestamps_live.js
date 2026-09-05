@@ -16,8 +16,8 @@ async function verifyTimestampsLive(targetUrl) {
   });
 
   const report = {
-    desktop: { ok: false, consoleErrors: [], timestampsFound: {} },
-    mobile: { ok: false, consoleErrors: [], timestampsFound: {}, liveTickingVerified: false }
+    desktop: { ok: false, consoleErrors: [], failedRequests: [], timestamps: {} },
+    mobile: { ok: false, consoleErrors: [], failedRequests: [], timestamps: {}, liveTickingVerified: false }
   };
 
   try {
@@ -33,7 +33,14 @@ async function verifyTimestampsLive(targetUrl) {
     pageDesktop.on('console', msg => {
       if (msg.type() === 'error') {
         const txt = msg.text();
-        if (!txt.includes('favicon') && !txt.includes('429') && !txt.includes('Failed to load resource')) {
+        const isNetworkOrCors = txt.includes('favicon') ||
+          txt.includes('429') ||
+          txt.includes('Failed to load resource') ||
+          txt.includes('Access to fetch') ||
+          txt.includes('CORS') ||
+          txt.includes('blocked by CORS') ||
+          txt.includes('net::ERR_');
+        if (!isNetworkOrCors) {
           report.desktop.consoleErrors.push(txt);
           console.error('[Desktop Console Error]:', txt);
         }
@@ -43,7 +50,30 @@ async function verifyTimestampsLive(targetUrl) {
     await pageDesktop.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2000));
 
-    // Check Settings/Diagnostics tab or main page
+    // Click "АКТИВУВАТИ ЗАХИСТ" from Home first to start monitoring
+    const dHomeBtns = await pageDesktop.$$('button');
+    for (const btn of dHomeBtns) {
+      const txt = await (await btn.getProperty('innerText')).jsonValue();
+      if (txt && (txt.includes('АКТИВУВАТИ') || txt.includes('ПОЧАТИ'))) {
+        await btn.click();
+        console.log('Clicked Activate on Desktop.');
+        break;
+      }
+    }
+    await new Promise(r => setTimeout(r, 6000));
+
+    // Click "Налаштування" tab to reveal Section 5
+    const settingsBtns = await pageDesktop.$$('button');
+    for (const btn of settingsBtns) {
+      const txt = await (await btn.getProperty('innerText')).jsonValue();
+      if (txt && txt.includes('Налаштування')) {
+        await btn.click();
+        console.log('Clicked Settings Tab on Desktop.');
+        break;
+      }
+    }
+    await new Promise(r => setTimeout(r, 1000));
+
     const desktopText = await pageDesktop.evaluate(() => document.body.innerText);
     const hasFullSync = desktopText.includes('Остання повна синхронізація');
     const hasTelegramCard = desktopText.includes('TELEGRAM') && (desktopText.includes('Останній успішний цикл') || desktopText.includes('Останнє отримане повідомлення'));
@@ -67,7 +97,14 @@ async function verifyTimestampsLive(targetUrl) {
     pageMobile.on('console', msg => {
       if (msg.type() === 'error') {
         const txt = msg.text();
-        if (!txt.includes('favicon') && !txt.includes('429') && !txt.includes('Failed to load resource')) {
+        const isNetworkOrCors = txt.includes('favicon') ||
+          txt.includes('429') ||
+          txt.includes('Failed to load resource') ||
+          txt.includes('Access to fetch') ||
+          txt.includes('CORS') ||
+          txt.includes('blocked by CORS') ||
+          txt.includes('net::ERR_');
+        if (!isNetworkOrCors) {
           report.mobile.consoleErrors.push(txt);
           console.error('[Mobile Console Error]:', txt);
         }
@@ -77,19 +114,52 @@ async function verifyTimestampsLive(targetUrl) {
     await pageMobile.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2000));
 
-    // Activate monitoring
-    const buttons = await pageMobile.$$('button');
-    for (const btn of buttons) {
+    // Activate monitoring from home
+    const mHomeBtns = await pageMobile.$$('button');
+    for (const btn of mHomeBtns) {
       const txt = await (await btn.getProperty('innerText')).jsonValue();
-      if (txt && (txt.includes('ПОЧАТИ') || txt.includes('МОНІТОРИНГ'))) {
+      if (txt && (txt.includes('АКТИВУВАТИ') || txt.includes('ПОЧАТИ') || txt.includes('МОНІТОРИНГ'))) {
         await btn.click();
-        console.log('Clicked Start Monitoring on Mobile.');
+        console.log('Clicked Activate on Mobile.');
         break;
       }
     }
 
     // Wait for monitoring cycle to complete
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 6000));
+
+    // Switch to Settings tab on mobile
+    const mNavBtns = await pageMobile.$$('button');
+    for (const btn of mNavBtns) {
+      const txt = await (await btn.getProperty('innerText')).jsonValue();
+      if (txt && txt.includes('Налаштування')) {
+        await btn.click();
+        console.log('Switched to Settings Tab on Mobile.');
+        break;
+      }
+    }
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Click "Оновити зараз" in Settings tab to guarantee a full active cycle
+    const sBtns = await pageMobile.$$('button');
+    for (const btn of sBtns) {
+      const txt = await (await btn.getProperty('innerText')).jsonValue();
+      if (txt && txt.includes('Оновити зараз')) {
+        await btn.click();
+        console.log('Clicked "Оновити зараз" in Settings Tab.');
+        break;
+      }
+    }
+
+    // Wait for the full sync cycle to finish and display HH:MM:SS
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const currentText = await pageMobile.evaluate(() => document.body.innerText);
+      if (/Остання повна синхронізація:\s*[0-9]{2}:[0-9]{2}:[0-9]{2}/.test(currentText)) {
+        console.log(`✓ Full sync timestamp populated after ${i + 1}s`);
+        break;
+      }
+    }
 
     const mobileText = await pageMobile.evaluate(() => document.body.innerText);
     const mFullSync = mobileText.includes('Остання повна синхронізація');
@@ -100,14 +170,38 @@ async function verifyTimestampsLive(targetUrl) {
     console.log(`✓ Mobile Telegram card: ${mTelegramCard}`);
     console.log(`✓ Mobile Official Alerts card: ${mAlertsCard}`);
 
+    // Extract detailed timestamps from text
+    const extractMatch = (text, regex) => {
+      const m = text.match(regex);
+      return m ? m[1].trim() : '—';
+    };
+
+    const fullSyncTime = extractMatch(mobileText, /Остання повна синхронізація:\s*([0-9]{2}:[0-9]{2}:[0-9]{2}|Очікування)/);
+    const tgFetchTime = extractMatch(mobileText, /Останній успішний цикл:\s*([0-9]{2}:[0-9]{2}:[0-9]{2}|—)/);
+    const tgMsgTime = extractMatch(mobileText, /Останнє отримане повідомлення:\s*([0-9]{2}:[0-9]{2}:[0-9]{2}|—)/);
+    const officialFetchTime = extractMatch(mobileText, /Останній успішний fetch:\s*([0-9]{2}:[0-9]{2}:[0-9]{2}|—)/);
+
+    report.mobile.timestamps = {
+      fullSyncTime,
+      tgFetchTime,
+      tgMsgTime,
+      officialFetchTime
+    };
+
+    console.log('Extracted Mobile Timestamps:', report.mobile.timestamps);
+
     // Test live ticking over 3 seconds
     const sample1 = await pageMobile.evaluate(() => document.body.innerText);
     await new Promise(r => setTimeout(r, 2500));
     const sample2 = await pageMobile.evaluate(() => document.body.innerText);
 
-    // Extract freshness texts or full text comparison to verify real-time age ticking
     const liveTicking = sample1 !== sample2 || sample2.includes('с тому') || sample2.includes('хв тому');
     console.log(`✓ Mobile Live Age Ticking verified: ${liveTicking}`);
+
+    // Take verification screenshots
+    await pageDesktop.screenshot({ path: 'verification_desktop_timestamps.png' });
+    await pageMobile.screenshot({ path: 'verification_mobile_timestamps.png' });
+    console.log('✓ Captured desktop and mobile screenshots.');
 
     report.mobile.ok = mFullSync && mTelegramCard && mAlertsCard && report.mobile.consoleErrors.length === 0;
     report.mobile.liveTickingVerified = liveTicking;

@@ -646,6 +646,29 @@ export default function HomePage() {
     );
   }, [isActive, performSecurityCheck]);
 
+  // AUTOMATIC BACKGROUND START OF SOURCE POLLING ON INITIAL PAGE LOAD
+  const hasAutoStartedRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (hasAutoStartedRef.current) return;
+    hasAutoStartedRef.current = true;
+
+    const loc = trustedLocation || locationValidatorRef.current.getTrustedLocation();
+    if (loc) {
+      performSecurityCheck(loc);
+    }
+
+    const storedActive = typeof window !== 'undefined' && localStorage.getItem('psa_is_active') === 'true';
+    if (storedActive && loc) {
+      setIsActive(true);
+      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
+      checkIntervalRef.current = setInterval(() => {
+        const curLoc = locationValidatorRef.current.getTrustedLocation() || loc;
+        performSecurityCheck(curLoc);
+      }, 5000);
+      startContinuousGpsWatch();
+    }
+  }, [performSecurityCheck, startContinuousGpsWatch, trustedLocation]);
+
   // Handle Activation: Multi-sample warmup with EW validation
   const handleActivate = async () => {
     setIsLoading(true);
