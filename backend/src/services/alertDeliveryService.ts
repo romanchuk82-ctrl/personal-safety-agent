@@ -16,6 +16,44 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 
 export class AlertDeliveryService {
   private deduplicationCache = new Map<string, number>();
+  private dangerRepeatKeys = new Set<string>();
+
+  constructor(private readonly dangerRepeatDelayMs = 25_000) {}
+
+  scheduleDangerRepeat(
+    session: DeviceSession,
+    assessment: AlertAssessment,
+    resolveCurrent: () => Promise<{ session: DeviceSession; assessment: AlertAssessment } | null>
+  ): boolean {
+    if (assessment.severity !== 'DANGER') return false;
+    const key = `${session.deviceId}:${assessment.threatId}`;
+    if (this.dangerRepeatKeys.has(key)) return false;
+    this.dangerRepeatKeys.add(key);
+    setTimeout(async () => {
+      try {
+        const current = await resolveCurrent();
+        if (!current || current.assessment.severity !== 'DANGER' || !current.assessment.alertRequired) {
+          console.log(`[WebPush] DANGER repeat skipped key=${key} reason=NO_LONGER_RELEVANT`);
+          return;
+        }
+        const result = await this.deliverAlert(current.session, current.assessment, {
+          force: true,
+          isTest: false,
+          isRepeat: true
+        });
+        console.log(`[WebPush] DANGER repeat key=${key} success=${result.webPushSuccess}`);
+      } catch (error: any) {
+        console.error(`[WebPush] DANGER repeat key=${key} error=${error?.message || error}`);
+      }
+    }, this.dangerRepeatDelayMs);
+    return true;
+  }
+
+  clearDangerRepeat(threatId: string): void {
+    for (const key of this.dangerRepeatKeys) {
+      if (key.endsWith(`:${threatId}`)) this.dangerRepeatKeys.delete(key);
+    }
+  }
 
   /**
    * Send Web Push notification to user's locked iPhone
@@ -28,9 +66,15 @@ export class AlertDeliveryService {
   ): Promise<{ success: boolean; called: boolean; statusCode?: number; message?: string }> {
     try {
       const payload = JSON.stringify({
+        web_push: 8030,
         notification: {
           title,
           body,
+          lang: 'uk-UA',
+          dir: 'ltr',
+          navigate: 'https://romanchuk82-ctrl.github.io/personal-safety-agent/',
+          silent: false,
+          app_badge: data.severity === 'DANGER' ? '1' : undefined,
           icon: '/personal-safety-agent/icons/icon-192x192.png',
           badge: '/personal-safety-agent/icons/icon-192x192.png',
           vibrate: [500, 200, 500, 200, 800],
@@ -54,7 +98,7 @@ export class AlertDeliveryService {
         },
         payload,
         {
-          TTL: 60,
+          TTL: 120,
           urgency: 'high'
         }
       );
@@ -106,7 +150,7 @@ export class AlertDeliveryService {
   async deliverAlert(
     session: DeviceSession,
     assessment: AlertAssessment,
-    options: { isTest?: boolean; force?: boolean } = {}
+    options: { isTest?: boolean; force?: boolean; isRepeat?: boolean } = {}
   ): Promise<AlertDeliveryResult> {
     const dedupKey = `${session.deviceId}:${assessment.threatId}`;
     const now = Date.now();
@@ -126,16 +170,18 @@ export class AlertDeliveryService {
     let webPushProvider: AlertDeliveryResult['webPushProvider'] = { called: false };
     let telegramSuccess = false;
 
-    let title = assessment.alertTitle;
-    if (!title.startsWith('🚨') && !title.startsWith('⚠️')) {
+    let title = assessment.severity === 'DANGER' ? '🚨 НЕБЕЗПЕКА ПОРУЧ' : assessment.alertTitle;
+    if (assessment.severity !== 'DANGER' && !title.startsWith('🚨') && !title.startsWith('⚠️')) {
       const prefix = options.isTest ? '⚠️ [TEST] ' : '🚨 ';
       title = `${prefix}${assessment.alertTitle}`;
     }
 
     const isTest = options.isTest || title.includes('TEST');
-    const body = isTest && assessment.alertBody.includes('Тестове попередження')
+    const body = assessment.severity === 'DANGER'
       ? assessment.alertBody
-      : `${assessment.alertBody} Дистанція: ~${assessment.distanceKm.toFixed(1)} км (${assessment.directionCompass}).`;
+      : isTest && assessment.alertBody.includes('Тестове попередження')
+        ? assessment.alertBody
+        : `${assessment.alertBody} Дистанція: ~${assessment.distanceKm.toFixed(1)} км (${assessment.directionCompass}).`;
 
     // 1. Web Push Channel
     if (session.webPushSubscription) {
@@ -147,7 +193,9 @@ export class AlertDeliveryService {
           threatId: assessment.threatId,
           distanceKm: assessment.distanceKm,
           directionCompass: assessment.directionCompass,
-          isTest: options.isTest
+          isTest: options.isTest,
+          severity: assessment.severity,
+          isRepeat: !!options.isRepeat
         }
       );
       webPushSuccess = pushResult.success;

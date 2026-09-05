@@ -106,6 +106,7 @@ export interface AlertAssessment {
   distanceKm: number;
   directionCompass: string;
   relevance: 'CRITICAL' | 'WARNING' | 'OBSERVATION' | 'IRRELEVANT';
+  severity: 'INFO' | 'WARNING' | 'DANGER';
   alertRequired: boolean;
   alertTitle: string;
   alertBody: string;

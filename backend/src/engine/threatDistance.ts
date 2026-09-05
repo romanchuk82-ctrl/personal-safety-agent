@@ -86,22 +86,36 @@ export function evaluateThreatProximity(
   const compass = degreesToCompass(bearing);
 
   let relevance: AlertAssessment['relevance'] = 'IRRELEVANT';
+  let severity: AlertAssessment['severity'] = 'INFO';
   let alertRequired = false;
 
   if (dist <= 5.0) {
     relevance = 'CRITICAL';
+    severity = 'DANGER';
     alertRequired = true;
   } else if (dist <= 15.0) {
     relevance = 'WARNING';
+    severity = 'WARNING';
     alertRequired = true;
   } else if (dist <= 30.0) {
     relevance = 'OBSERVATION';
     alertRequired = false;
   }
 
-  const alertTitle = 'ATTENTION! DANGER';
+  const alertTitle = severity === 'DANGER' ? '🚨 НЕБЕЗПЕКА ПОРУЧ' : '⚠️ ПОПЕРЕДЖЕННЯ ПРО ЗАГРОЗУ';
   const prefix = threat.isSimulated ? '[TEST] ' : '';
-  const alertBody = `${prefix}Threat nearby · ~${Math.round(dist)} km (${compass.en})\n${threat.title || threat.description}`;
+  const threatType: Record<string, string> = {
+    UAV_STRIKE: 'БпЛА',
+    BALLISTIC_MISSILE: 'Балістична ракета',
+    CRUISE_MISSILE: 'Крилата ракета',
+    AVIATION: 'Авіаційна загроза',
+    ARTILLERY: 'Артилерійська загроза',
+    GENERAL_AIR_ALARM: 'Повітряна тривога'
+  };
+  const reliableDirection = Number.isFinite(bearing) && (userLoc.horizontalAccuracy ?? 0) <= 1000;
+  const directionPart = reliableDirection ? ` · напрямок ${compass.uk}` : '';
+  const locationPart = threat.title ? ` · ${threat.title.replace(/^\[TEST\]\s*/, '')}` : '';
+  const alertBody = `${prefix}${threatType[threat.category] || 'Загроза'} · ${roundedKm.toFixed(1)} км${directionPart}${locationPart}`;
 
   return {
     threatId: threat.id,
@@ -109,6 +123,7 @@ export function evaluateThreatProximity(
     distanceKm: roundedKm,
     directionCompass: compass.en,
     relevance,
+    severity,
     alertRequired,
     alertTitle,
     alertBody,

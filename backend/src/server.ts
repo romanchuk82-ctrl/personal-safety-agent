@@ -273,15 +273,16 @@ app.post('/api/alerts/test-push', async (req: Request, res: Response) => {
 
   console.log(`[TestPush] deviceId=${deviceId} sessionFound=YES subscriptionFound=YES endpointPresent=${session.webPushSubscription.endpoint ? 'YES' : 'NO'} sendNotificationCalled=NO`);
   await new Promise(resolve => setTimeout(resolve, delayMs));
-  const assessment: AlertAssessment = {
+      const assessment: AlertAssessment = {
         threatId: `test-lock-${Date.now()}`,
         category: 'UAV_STRIKE',
         distanceKm: 5.0,
         directionCompass: 'Пн-Сх',
         relevance: 'CRITICAL',
+        severity: 'DANGER',
         alertRequired: true,
-        alertTitle: '🚨 TEST — PERSONAL SAFETY AGENT',
-        alertBody: 'Увага! Тестове попередження про небезпеку.',
+        alertTitle: '🚨 НЕБЕЗПЕКА ПОРУЧ',
+        alertBody: '[TEST] БпЛА · 5.0 км · напрямок Пн-Сх',
         timestamp: Date.now()
   };
   const result = await alertDeliveryService.deliverAlert(session, assessment, { isTest: true, force: true });
@@ -338,6 +339,7 @@ app.post('/api/alerts/test-channel', async (req: Request, res: Response) => {
     distanceKm,
     directionCompass: 'Пн-Сх',
     relevance: 'CRITICAL',
+    severity: distanceKm <= 5 ? 'DANGER' : 'WARNING',
     alertRequired: true,
     alertTitle: title,
     alertBody: body,
@@ -365,8 +367,8 @@ app.post('/api/alerts/test-channel', async (req: Request, res: Response) => {
   }
 
   res.json({
-    success: true,
-    message: 'Test alert delivered via active channels',
+    success: delivery.webPushSuccess || delivery.telegramSuccess,
+    message: delivery.webPushSuccess ? 'Test Web Push accepted by provider' : 'Test Web Push was not accepted by provider',
     testType: testType || 'TEST_THREAT_5KM',
     delivery
   });
@@ -392,6 +394,7 @@ app.post('/api/alerts/test', async (req: Request, res: Response) => {
     distanceKm: 4.8,
     directionCompass: 'Пн-Сх',
     relevance: 'CRITICAL',
+    severity: 'DANGER',
     alertRequired: true,
     alertTitle: 'TEST ALARM',
     alertBody: 'Перевірка системи безпеки: сповіщення на замкнений екран доставлено.',

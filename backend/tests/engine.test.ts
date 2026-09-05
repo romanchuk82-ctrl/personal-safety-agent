@@ -145,9 +145,10 @@ test('ThreatDistance: evaluates proximity alert relevance thresholds', () => {
   };
   const evalCrit = evaluateThreatProximity(userLoc, criticalThreat);
   assert.equal(evalCrit.relevance, 'CRITICAL');
+  assert.equal(evalCrit.severity, 'DANGER');
   assert.equal(evalCrit.alertRequired, true);
-  assert.equal(evalCrit.alertTitle, 'ATTENTION! DANGER');
-  assert.ok(evalCrit.alertBody.includes('Threat nearby · ~2 km') || evalCrit.alertBody.includes('Threat nearby · ~3 km'));
+  assert.equal(evalCrit.alertTitle, '🚨 НЕБЕЗПЕКА ПОРУЧ');
+  assert.match(evalCrit.alertBody, /БпЛА · [23]\.\d км · напрямок Пн/);
 
   // Case B: Warning Threat (12 km away) -> WARNING
   const warningThreat: ThreatEvent = {
@@ -164,6 +165,7 @@ test('ThreatDistance: evaluates proximity alert relevance thresholds', () => {
   };
   const evalWarn = evaluateThreatProximity(userLoc, warningThreat);
   assert.equal(evalWarn.relevance, 'WARNING');
+  assert.equal(evalWarn.severity, 'WARNING');
   assert.equal(evalWarn.alertRequired, true);
 
   // Case C: Distant Observation (25 km away) -> OBSERVATION (No loud alarm)

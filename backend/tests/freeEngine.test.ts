@@ -139,6 +139,7 @@ test('5. AlertDeliveryService: Dispatches free-tier Web Push & Telegram with [TE
     distanceKm: 5.2,
     directionCompass: 'Пн-Сх',
     relevance: 'CRITICAL',
+    severity: 'DANGER',
     alertRequired: true,
     alertTitle: 'TEST THREAT 5 KM',
     alertBody: 'Імітація тактичної загрози за 5 км',

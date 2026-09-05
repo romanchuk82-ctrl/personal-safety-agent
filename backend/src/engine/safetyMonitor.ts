@@ -55,6 +55,7 @@ export class SafetyMonitor {
    */
   public clearThreat(threatId: string): void {
     this.activeThreats.delete(threatId);
+    alertDeliveryService.clearDangerRepeat(threatId);
     console.log(`[SafetyMonitor] Cleared threat: ${threatId}`);
   }
 
@@ -94,9 +95,12 @@ export class SafetyMonitor {
             console.log(`[SafetyMonitor] Delivering alert to Device ${device.deviceId} for threat ${threat.id} (dist: ${assessment.distanceKm.toFixed(1)} km)`);
             
             // Deliver through Web Push and Telegram (Free $0/year tier)
-            await alertDeliveryService.deliverAlert(device, assessment, {
+            const delivery = await alertDeliveryService.deliverAlert(device, assessment, {
               isTest: threat.isSimulated
             });
+            if (delivery.webPushSuccess && assessment.severity === 'DANGER') {
+              this.scheduleRepeatIfStillDanger(device.deviceId, threat.id);
+            }
 
             // If APNs token exists, also forward
             if (device.apnsToken) {
@@ -136,9 +140,12 @@ export class SafetyMonitor {
         const shouldAlert = shouldReAlertMovingUser(prevDist, assessment.distanceKm);
 
         if (shouldAlert) {
-          await alertDeliveryService.deliverAlert(device, assessment, {
+          const delivery = await alertDeliveryService.deliverAlert(device, assessment, {
             isTest: threat.isSimulated
           });
+          if (delivery.webPushSuccess && assessment.severity === 'DANGER') {
+            this.scheduleRepeatIfStillDanger(device.deviceId, threat.id);
+          }
 
           if (device.apnsToken) {
             apnsService.sendAlert(device.apnsToken, {
@@ -158,6 +165,20 @@ export class SafetyMonitor {
     }
 
     return sent;
+  }
+
+  private scheduleRepeatIfStillDanger(deviceId: string, threatId: string): void {
+    const initialDevice = deviceManager.getDevice(deviceId);
+    const initialThreat = this.activeThreats.get(threatId);
+    if (!initialDevice || !initialThreat || !initialDevice.lastLocation) return;
+    const initialAssessment = evaluateThreatProximity(initialDevice.lastLocation, initialThreat);
+    alertDeliveryService.scheduleDangerRepeat(initialDevice, initialAssessment, async () => {
+      const device = deviceManager.getDevice(deviceId);
+      const threat = this.activeThreats.get(threatId);
+      if (!device?.lastLocation || !threat) return null;
+      const assessment = evaluateThreatProximity(device.lastLocation, threat);
+      return assessment.severity === 'DANGER' && assessment.alertRequired ? { session: device, assessment } : null;
+    });
   }
 
   /**

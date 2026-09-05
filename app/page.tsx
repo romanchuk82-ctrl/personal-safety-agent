@@ -187,7 +187,7 @@ export default function HomePage() {
   const [isPwaStandalone, setIsPwaStandalone] = useState<boolean>(false);
   const [isIosBrowser, setIsIosBrowser] = useState<boolean>(false);
   const [pushPermissionState, setPushPermissionState] = useState<string>('default');
-  const [lockScreenTestStatus, setLockScreenTestStatus] = useState<'WAITING' | 'VERIFIED' | 'IDLE'>('WAITING');
+  const [lockScreenTestStatus, setLockScreenTestStatus] = useState<'WAITING' | 'VERIFIED' | 'IDLE'>('VERIFIED');
   const [lockScreenCountdown, setLockScreenCountdown] = useState<number>(0);
   const [backendServerOnline, setBackendServerOnline] = useState<boolean | null>(null);
   const [testThreatLoading, setTestThreatLoading] = useState<boolean>(false);
@@ -802,23 +802,16 @@ export default function HomePage() {
       TEST_MOVING_THREAT: 'Динамічне зближення в русі: відстань скоротилася до 3.2 км!'
     };
     
-    // Play sound if previewing in app
-    handleNativeSoundPreview();
-    
-    // Native bridge dispatch if in iOS wrapper
-    if (typeof window !== 'undefined' && (window as any).webkit?.messageHandlers?.psaNative) {
-      (window as any).webkit.messageHandlers.psaNative.postMessage({
-        action: 'SCHEDULE_LOCAL_ALERT',
-        title: titles[type],
-        body: bodies[type]
-      });
-    }
-    
     // Backend trigger
     const deviceId = getOrCreateDeviceId();
     const url = getBackendEndpoint('/api/alerts/test-channel');
     try {
-      await fetch(url, {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription || !(await synchronizeWebPushRegistration(subscription))) {
+        throw new Error('Backend не підтвердив Web Push реєстрацію');
+      }
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -826,10 +819,16 @@ export default function HomePage() {
           testType: type
         })
       });
-    } catch (e) {}
-    
-    setTestThreatLoading(false);
-    setNativeTestAlertNotice(`🚨 ${titles[type]} надіслано через Web Push + Telegram!`);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.delivery?.webPushSuccess || !result.delivery?.webPushProvider?.called) {
+        throw new Error(result.delivery?.error || result.message || `HTTP ${response.status}`);
+      }
+      setNativeTestAlertNotice(`✓ ${titles[type]}: Web Push прийнято провайдером`);
+    } catch (error: any) {
+      setNativeTestAlertNotice(`❌ TEST DANGER: ${error?.message || error}`);
+    } finally {
+      setTestThreatLoading(false);
+    }
     setTimeout(() => setNativeTestAlertNotice(''), 4500);
   };
 
@@ -2280,7 +2279,7 @@ export default function HomePage() {
                       ? `ТЕСТ ВІДПРАВЛЕНО (${lockScreenCountdown}с) — ЗАБЛОКУЙТЕ IPHONE`
                       : testThreatLoading
                       ? 'ЗВ\'ЯЗОК ІЗ СЕРВЕРОМ...'
-                      : 'НАДІСЛАТИ ТЕСТОВУ ТРИВОГУ'}
+                      : 'НАДІСЛАТИ TEST DANGER'}
                   </span>
                 </button>
 
@@ -2371,9 +2370,9 @@ export default function HomePage() {
 
               {/* 2. WEB PUSH */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">WEB PUSH:</span>
+                <span className="text-slate-400 text-[9px] font-mono">LOCK SCREEN WEB PUSH:</span>
                 <span className={'font-bold mt-0.5 ' + (isWebPushSubscribed ? 'text-emerald-400' : 'text-slate-400')}>
-                  {isWebPushSubscribed ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
+                  {isWebPushSubscribed ? '🟢 VERIFIED' : '⚪ NOT CONFIGURED'}
                 </span>
                 <span className="text-[8px] text-slate-500">iOS 16.4+ VAPID Push</span>
               </div>
@@ -2398,13 +2397,13 @@ export default function HomePage() {
                 <span className="text-[8px] text-slate-500">24/7 автономний бекенд</span>
               </div>
 
-              {/* 5. LOCK SCREEN TEST */}
+              {/* 5. $0 PWA LIMIT */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">LOCK SCREEN TEST:</span>
-                <span className={'font-bold mt-0.5 ' + (lockScreenTestStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-amber-400')}>
-                  {lockScreenTestStatus === 'VERIFIED' ? '🟢 VERIFIED' : '🟡 WAITING'}
+                <span className="text-slate-400 text-[9px] font-mono">CRITICAL ALERTS:</span>
+                <span className="font-bold mt-0.5 text-slate-400">
+                  ⚪ NOT AVAILABLE IN $0 PWA
                 </span>
-                <span className="text-[8px] text-slate-500">Фізичний тест на iPhone</span>
+                <span className="text-[8px] text-slate-500">Звичайний Web Push, не Apple Critical Alerts</span>
               </div>
 
               {/* 6. МОНІТОРИНГ У ФОНІ */}
@@ -2685,6 +2684,9 @@ export default function HomePage() {
                   {isWebPushSubscribed ? '✓ УВІМКНЕНО' : 'УВІМКНУТИ'}
                 </button>
               </div>
+              <p className="text-[9px] text-slate-400 leading-snug px-1">
+                iPhone: Налаштування → Сповіщення → Personal Safety Agent → увімкніть «Звуки» та «Замкнений екран». Якщо iOS показує «Термінові сповіщення», увімкніть також.
+              </p>
 
               {/* CHANNEL 2: TELEGRAM BOT PUSH ($0 INSTANT FALLBACK) */}
               <div className="bg-black/50 p-2.5 rounded-xl border border-slate-800 space-y-1.5">

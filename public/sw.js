@@ -1,5 +1,5 @@
 // Personal Safety Agent Service Worker (iOS 16.4+ Web Push support)
-const CACHE_NAME = 'psa-v4';
+const CACHE_NAME = 'psa-v5';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -38,7 +38,9 @@ self.addEventListener('push', (event) => {
     icon: iconUrl,
     badge: iconUrl,
     tag: data.tag || 'test-threat-alert',
-    sound: 'default',
+    silent: false,
+    timestamp: Date.now(),
+    lang: 'uk-UA',
     vibrate: [500, 200, 500, 200, 800],
     requireInteraction: true,
     renotify: true,
