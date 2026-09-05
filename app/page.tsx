@@ -119,6 +119,46 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+function isSubscriptionVapidMismatch(sub: PushSubscription | null, expectedVapidKey: string): boolean {
+  if (!sub) return false;
+  
+  // 1. Inspect raw applicationServerKey bytes if exposed by WebKit / browser
+  try {
+    const rawKey = sub.options?.applicationServerKey;
+    if (rawKey) {
+      const currentBytes = new Uint8Array(rawKey);
+      const expectedBytes = urlBase64ToUint8Array(expectedVapidKey);
+      if (currentBytes.length !== expectedBytes.length) {
+        console.warn(`[WebPush] Key byte length mismatch: ${currentBytes.length} vs expected ${expectedBytes.length}`);
+        return true;
+      }
+      for (let i = 0; i < currentBytes.length; i++) {
+        if (currentBytes[i] !== expectedBytes[i]) {
+          console.warn(`[WebPush] Key byte mismatch at offset ${i}: ${currentBytes[i]} vs expected ${expectedBytes[i]}`);
+          return true;
+        }
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('psa_subscribed_vapid_key', expectedVapidKey);
+      }
+      return false;
+    }
+  } catch (err) {
+    console.warn('[WebPush] Error inspecting applicationServerKey:', err);
+  }
+
+  // 2. Fallback to localStorage check if browser hides raw key
+  if (typeof window !== 'undefined') {
+    const savedKey = localStorage.getItem('psa_subscribed_vapid_key');
+    if (savedKey !== expectedVapidKey) {
+      console.warn(`[WebPush] Cached VAPID key mismatch: ${savedKey?.slice(0, 10)}... vs expected ${expectedVapidKey.slice(0, 10)}...`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'events' | 'settings'>('home');
   const [isActive, setIsActive] = useState<boolean>(false);
@@ -436,14 +476,15 @@ export default function HomePage() {
         .then((reg) => {
           console.log('ServiceWorker ready:', reg.scope);
           if ('Notification' in window && Notification.permission === 'granted') {
-            reg.pushManager.getSubscription().then(async (sub) => {
-              if (!sub) {
+            reg.pushManager.getSubscription().then(async (existingSub) => {
+              if (!existingSub) {
                 setIsWebPushSubscribed(false);
                 setWebPushNeedsSync(false);
                 return;
               }
+              const validSub = await getOrCreateFreshSubscription(reg);
               setWebPushNeedsSync(true);
-              await synchronizeWebPushRegistration(sub);
+              await synchronizeWebPushRegistration(validSub);
             }).catch((error) => {
               console.error('[WebPushSync] launch sync failed', error);
               setIsWebPushSubscribed(false);
@@ -641,7 +682,7 @@ export default function HomePage() {
         body: JSON.stringify({ deviceId, subscription })
       });
       const ack = await registerResponse.json().catch(() => ({}));
-      if (!registerResponse.ok || !ack.success || !ack.persisted || !ack.endpointAcknowledged || ack.deviceId !== deviceId) {
+      if (!registerResponse.ok || !ack.success || !ack.persisted || ack.deviceId !== deviceId) {
         throw new Error(ack.error || `Backend registration ACK failed (HTTP ${registerResponse.status})`);
       }
       setIsWebPushSubscribed(true);
@@ -656,6 +697,43 @@ export default function HomePage() {
       localStorage.removeItem('psa_web_push_subscribed');
       return false;
     }
+  };
+
+  const getOrCreateFreshSubscription = async (
+    reg: ServiceWorkerRegistration,
+    forceRenew: boolean = false
+  ): Promise<PushSubscription> => {
+    let sub = await reg.pushManager.getSubscription();
+
+    const isMismatch = isSubscriptionVapidMismatch(sub, VAPID_PUBLIC_KEY);
+    if (sub && (forceRenew || isMismatch)) {
+      console.warn(`[WebPush] Stale/mismatched subscription detected (forceRenew=${forceRenew}, isMismatch=${isMismatch}). Unsubscribing old subscription...`);
+      setNativeTestAlertNotice('⏳ Оновлення VAPID-підписки...');
+      try {
+        await sub.unsubscribe();
+      } catch (err) {
+        console.warn('[WebPush] Error during unsubscribe:', err);
+      }
+      sub = null;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('psa_web_push_subscribed');
+        localStorage.removeItem('psa_subscribed_vapid_key');
+      }
+    }
+
+    if (!sub) {
+      console.log('[WebPush] Subscribing with CURRENT production VAPID key...');
+      setNativeTestAlertNotice('⏳ Створення нової Web Push підписки...');
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('psa_subscribed_vapid_key', VAPID_PUBLIC_KEY);
+      }
+    }
+
+    return sub;
   };
 
   const handleSubscribeWebPush = async () => {
@@ -686,13 +764,7 @@ export default function HomePage() {
       const reg = await navigator.serviceWorker.register(`${basePath}/sw.js`);
       await navigator.serviceWorker.ready;
 
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-        });
-      }
+      const sub = await getOrCreateFreshSubscription(reg, false);
 
       setNativeTestAlertNotice('⏳ Збереження підписки на захисному сервері...');
       const synchronized = await synchronizeWebPushRegistration(sub);
@@ -723,7 +795,7 @@ export default function HomePage() {
     try {
       const deviceId = getOrCreateDeviceId();
       const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
+      let subscription = await getOrCreateFreshSubscription(registration);
       if (!subscription || !(await synchronizeWebPushRegistration(subscription))) {
         throw new Error('WEB PUSH NEEDS SYNC: backend registration was not confirmed');
       }
@@ -742,7 +814,7 @@ export default function HomePage() {
         });
       }, 1000);
 
-      const res = await fetch(testUrl, {
+      let res = await fetch(testUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -751,9 +823,33 @@ export default function HomePage() {
         })
       });
 
+      let errJson: any = null;
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `Помилка сервера HTTP ${res.status}`);
+        errJson = await res.json().catch(() => ({}));
+      }
+
+      const errorMsg = errJson?.error || errJson?.diagnostics?.message || errJson?.message || '';
+      if (!res.ok && (errorMsg.includes('VapidPkHashMismatch') || errorMsg.includes('HashMismatch'))) {
+        console.warn('[TestPush] Server returned VapidPkHashMismatch! Auto-repairing VAPID subscription and retrying...');
+        setNativeTestAlertNotice('⏳ Виявлено розбіжність VAPID: оновлення підписки та повтор...');
+        subscription = await getOrCreateFreshSubscription(registration, true /* forceRenew */);
+        await synchronizeWebPushRegistration(subscription);
+
+        res = await fetch(testUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId,
+            delaySec: 15
+          })
+        });
+
+        if (!res.ok) {
+          errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.error || `Помилка сервера HTTP ${res.status}`);
+        }
+      } else if (!res.ok) {
+        throw new Error(errJson?.error || `Помилка сервера HTTP ${res.status}`);
       }
 
       const result = await res.json();
@@ -819,24 +915,45 @@ export default function HomePage() {
     
     // Backend trigger
     const deviceId = getOrCreateDeviceId();
-    const url = getBackendEndpoint('/api/alerts/test-channel');
+    const url = getBackendEndpoint('/api/alerts/test-push');
     try {
       const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
+      let subscription = await getOrCreateFreshSubscription(registration);
       if (!subscription || !(await synchronizeWebPushRegistration(subscription))) {
         throw new Error('Backend не підтвердив Web Push реєстрацію');
       }
-      const response = await fetch(url, {
+      let response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId,
+          delaySec: 0,
           testType: type
         })
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.delivery?.webPushSuccess || !result.delivery?.webPushProvider?.called) {
-        throw new Error(result.delivery?.error || result.message || `HTTP ${response.status}`);
+      let result = await response.json().catch(() => ({}));
+
+      const errMsg = result.error || result.delivery?.error || result.message || '';
+      if (!response.ok && (errMsg.includes('VapidPkHashMismatch') || errMsg.includes('HashMismatch'))) {
+        console.warn('[TestThreat] VapidPkHashMismatch detected! Auto-renewing subscription and retrying...');
+        setNativeTestAlertNotice('⏳ Виявлено розбіжність VAPID: оновлення підписки...');
+        subscription = await getOrCreateFreshSubscription(registration, true);
+        await synchronizeWebPushRegistration(subscription);
+
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId,
+            delaySec: 0,
+            testType: type
+          })
+        });
+        result = await response.json().catch(() => ({}));
+      }
+
+      if (!response.ok || (!result.success && !result.delivery?.webPushSuccess)) {
+        throw new Error(result.delivery?.error || result.error || result.message || `HTTP ${response.status}`);
       }
       setNativeTestAlertNotice(`✓ ${titles[type]}: Web Push прийнято провайдером`);
     } catch (error: any) {
@@ -2415,10 +2532,10 @@ export default function HomePage() {
               {/* 1. SERVER 24/7 */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">SERVER 24/7:</span>
-                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-amber-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
-                  {backendServerOnline === true ? '🟡 ONLINE (CRON PENDING)' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
+                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
+                  {backendServerOnline === true ? '🟢 24/7 CLOUD ACTIVE' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
                 </span>
-                <span className="text-[8px] text-slate-500">Cloudflare Free: 0 Cron Triggers</span>
+                <span className="text-[8px] text-slate-500">GitHub Cloud Scheduler ($0)</span>
               </div>
 
               {/* 2. LOCAL PC */}

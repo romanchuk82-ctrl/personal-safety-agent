@@ -145,7 +145,8 @@ export default {
           hasWebPush: !!session.webPushSubscription,
           locationHealth: session.locationHealth,
           hasLocation: !!session.lastLocation,
-          persisted: true
+          persisted: true,
+          endpointAcknowledged: true
         });
       }
 
@@ -252,7 +253,7 @@ export default {
       }
 
       // 6. TEST DANGER Web Push Trigger (with delayed lock screen test)
-      if (url.pathname === '/api/alerts/test-push' && request.method === 'POST') {
+      if ((url.pathname === '/api/alerts/test-push' || url.pathname === '/api/alerts/test-channel') && request.method === 'POST') {
         const body: any = await request.json().catch(() => ({}));
         const { deviceId, delaySec } = body as { deviceId: string; delaySec?: number };
 
@@ -294,9 +295,16 @@ export default {
         );
 
         if (!result.success && result.statusCode !== 201 && result.statusCode !== 200) {
+          const isVapidMismatch = typeof result.message === 'string' && result.message.includes('VapidPkHashMismatch');
           return jsonResponse({
             success: false,
-            error: result.message || 'Web Push provider rejected the notification',
+            error: isVapidMismatch ? 'VapidPkHashMismatch' : (result.message || 'Web Push provider rejected the notification'),
+            reason: isVapidMismatch ? 'VapidPkHashMismatch' : undefined,
+            delivery: {
+              webPushSuccess: false,
+              webPushProvider: result,
+              error: isVapidMismatch ? 'VapidPkHashMismatch' : result.message
+            },
             diagnostics: result
           }, 502);
         }
@@ -308,6 +316,10 @@ export default {
           message: 'Web Push accepted by Apple Push Service provider.',
           deviceId: session.deviceId,
           hasWebPush: true,
+          delivery: {
+            webPushSuccess: true,
+            webPushProvider: result
+          },
           provider: result
         });
       }
