@@ -126,6 +126,17 @@ let cachedOblasts: GeoJsonFeatureCollection | null = null;
 let cachedRaions: GeoJsonFeatureCollection | null = null;
 let cachedHromadas: GeoJsonFeatureCollection | null = null;
 
+function getBaseUrl(): string {
+  if (typeof window === 'undefined') return '';
+  const metaBase = process.env.NEXT_PUBLIC_BASE_PATH;
+  if (metaBase) return metaBase;
+  const pathname = window.location.pathname;
+  if (pathname.startsWith('/personal-safety-agent')) {
+    return '/personal-safety-agent';
+  }
+  return '';
+}
+
 async function loadDataset(filename: 'ukraine_oblasts.json' | 'ukraine_raions.json' | 'ukraine_hromadas.json'): Promise<GeoJsonFeatureCollection> {
   if (filename === 'ukraine_oblasts.json') {
     if (cachedOblasts) return cachedOblasts;
@@ -138,8 +149,10 @@ async function loadDataset(filename: 'ukraine_oblasts.json' | 'ukraine_raions.js
   let data: GeoJsonFeatureCollection | null = null;
 
   if (typeof window !== 'undefined') {
+    const basePath = getBaseUrl();
+    const url = `${basePath}/data/${filename}`;
     try {
-      const response = await fetch(`/data/${filename}`, { cache: 'force-cache' });
+      const response = await fetch(url, { cache: 'force-cache' });
       if (response.ok) {
         data = (await response.json()) as GeoJsonFeatureCollection;
       }
