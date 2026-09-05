@@ -979,15 +979,6 @@ export interface TelegramReader {
 
 export const TELEGRAM_READERS: TelegramReader[] = [
   {
-    id: 'cors_sh',
-    name: 'Cors.sh Proxy',
-    buildUrl: (u) => `https://proxy.cors.sh/https://t.me/s/${u}`,
-    headers: () => ({
-      'Accept': 'text/html'
-    }),
-    isBrowserSupported: true,
-  },
-  {
     id: 'jina_html',
     name: 'Jina HTML Proxy',
     buildUrl: (u) => `https://r.jina.ai/https://t.me/s/${u}`,
@@ -1181,8 +1172,8 @@ export async function fetchChannelMessages(
   let state = channelReaderStates[cleanUser];
   if (!state) {
     state = {
-      preferredReader: 'cors_sh',
-      activeReader: 'cors_sh',
+      preferredReader: 'jina_html',
+      activeReader: 'jina_html',
       lastSuccessfulReadTs: 0,
       health: 'ONLINE',
       failoverCount: 0
@@ -1190,8 +1181,8 @@ export async function fetchChannelMessages(
     channelReaderStates[cleanUser] = state;
   }
 
-  // Rate-limit safety: 15s normal cycle, 0s forced refresh threshold
-  const minInterval = options?.force ? 0 : 15000;
+  // Rate-limit safety: 45s normal cycle, 0s forced refresh threshold
+  const minInterval = options?.force ? 0 : 45000;
   if (!options?.force && cached && (now - cached.timestamp) < minInterval) {
     return {
       messages: cached.messages,
@@ -1224,7 +1215,7 @@ export async function fetchChannelMessages(
     ...availableReaders.filter(r => r.id !== preferred.id)
   ];
 
-  const perReaderTimeoutMs = Math.min(options?.timeoutMs || 3500, 4000);
+  const perReaderTimeoutMs = Math.min(options?.timeoutMs || 3000, 3000);
   let lastError = 'Тимчасово не відповідає';
   let isTimeout = false;
 
@@ -1392,8 +1383,8 @@ export async function fetchAllTelegramFeeds(
               lastMessageId: cached?.messages[cached.messages.length - 1]?.id,
               lastCheckTimestamp: cached?.timestamp || now,
               lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached?.timestamp || 0,
-              preferredReader: rState?.preferredReader || 'cors_sh',
-              activeReader: rState?.activeReader || 'cors_sh',
+              preferredReader: rState?.preferredReader || 'jina_html',
+              activeReader: rState?.activeReader || 'jina_html',
               fallbackReader: rState?.fallbackReader,
               isFallbackActive: !!rState?.fallbackReader,
               error: 'Таймаут (ліміт часу перевищено)',
@@ -1415,11 +1406,14 @@ export async function fetchAllTelegramFeeds(
         const ch = chunk[idx];
         const cleanU = ch.username.toLowerCase().replace(/^@/, '');
         const rState = channelReaderStates[cleanU];
+        const cached = telegramCache[cleanU];
+
         if (res.status === 'fulfilled') {
           const { messages, error, statusCategory, health, readerUsed, isFallback } = res.value;
-          messages.forEach(m => allMessagesMap.set(m.id, m));
-          const latestMsg = messages.length > 0 ? messages[messages.length - 1] : undefined;
-          const isOk = messages.length > 0 && (statusCategory === 'healthy' || health === 'ONLINE');
+          const effectiveMessages = (messages && messages.length > 0) ? messages : (cached?.messages || []);
+          effectiveMessages.forEach(m => allMessagesMap.set(m.id, m));
+          const latestMsg = effectiveMessages.length > 0 ? effectiveMessages[effectiveMessages.length - 1] : undefined;
+          const isOk = effectiveMessages.length > 0 && (statusCategory === 'healthy' || health === 'ONLINE' || (cached && cached.messages.length > 0));
 
           if (statusCategory === 'timeout') timeoutSourcesCount++;
           else if (!isOk) failedSourcesCount++;
@@ -1428,41 +1422,65 @@ export async function fetchAllTelegramFeeds(
             channel: ch.username,
             title: ch.title,
             ok: isOk,
-            count: messages.length,
+            count: effectiveMessages.length,
             lastMessageText: latestMsg?.text,
             lastMessageTimeIso: latestMsg?.timeIso,
             lastMessageId: latestMsg?.id,
             lastCheckTimestamp: now,
-            lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || (isOk ? now : 0),
-            preferredReader: rState?.preferredReader || 'cors_sh',
-            activeReader: readerUsed || rState?.activeReader || 'cors_sh',
+            lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached?.timestamp || (isOk ? now : 0),
+            preferredReader: rState?.preferredReader || 'jina_html',
+            activeReader: readerUsed || rState?.activeReader || 'jina_html',
             fallbackReader: rState?.fallbackReader,
             isFallbackActive: isFallback ?? !!rState?.fallbackReader,
             error: isOk ? undefined : (error || 'Немає свіжих повідомлень'),
             tier: ch.tier,
             hasWebPreview: true,
-            statusCategory: isOk ? 'healthy' : (statusCategory === 'timeout' ? 'unavailable' : 'unavailable'),
-            health: health || (isOk ? 'ONLINE' : 'FAILED')
+            statusCategory: isOk ? 'healthy' : 'unavailable',
+            health: isOk ? (health || 'ONLINE') : 'FAILED'
           };
         } else {
-          failedSourcesCount++;
-          sourceStatus[cleanU] = {
-            channel: ch.username,
-            title: ch.title,
-            ok: false,
-            count: 0,
-            lastCheckTimestamp: now,
-            lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || 0,
-            preferredReader: rState?.preferredReader || 'cors_sh',
-            activeReader: rState?.activeReader || 'cors_sh',
-            fallbackReader: rState?.fallbackReader,
-            isFallbackActive: !!rState?.fallbackReader,
-            error: res.reason?.message || 'Помилка з’єднання',
-            tier: ch.tier,
-            hasWebPreview: true,
-            statusCategory: 'unavailable',
-            health: 'FAILED'
-          };
+          if (cached && cached.messages.length > 0) {
+            cached.messages.forEach(m => allMessagesMap.set(m.id, m));
+            const latestMsg = cached.messages[cached.messages.length - 1];
+            sourceStatus[cleanU] = {
+              channel: ch.username,
+              title: ch.title,
+              ok: true,
+              count: cached.messages.length,
+              lastMessageText: latestMsg?.text,
+              lastMessageTimeIso: latestMsg?.timeIso,
+              lastMessageId: latestMsg?.id,
+              lastCheckTimestamp: cached.timestamp,
+              lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached.timestamp,
+              preferredReader: rState?.preferredReader || 'jina_html',
+              activeReader: rState?.activeReader || 'jina_html',
+              fallbackReader: rState?.fallbackReader,
+              isFallbackActive: !!rState?.fallbackReader,
+              tier: ch.tier,
+              hasWebPreview: true,
+              statusCategory: 'healthy',
+              health: 'DEGRADED'
+            };
+          } else {
+            failedSourcesCount++;
+            sourceStatus[cleanU] = {
+              channel: ch.username,
+              title: ch.title,
+              ok: false,
+              count: 0,
+              lastCheckTimestamp: now,
+              lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || 0,
+              preferredReader: rState?.preferredReader || 'jina_html',
+              activeReader: rState?.activeReader || 'jina_html',
+              fallbackReader: rState?.fallbackReader,
+              isFallbackActive: !!rState?.fallbackReader,
+              error: res.reason?.message || 'Помилка з’єднання',
+              tier: ch.tier,
+              hasWebPreview: true,
+              statusCategory: 'unavailable',
+              health: 'FAILED'
+            };
+          }
         }
       });
 
@@ -1472,17 +1490,125 @@ export async function fetchAllTelegramFeeds(
     }
   };
 
-  // 1. TIER 1: USER PRIORITY FIRST (concurrency 2, 400ms pacing to preserve Jina IP rate limits)
-  await fetchChannelTier(userPriorityChannels, 2, 400);
+  // 1. TIER 1: USER PRIORITY FIRST (concurrency 2, 300ms delay, batch of 4)
+  const sortedPriority = [...userPriorityChannels].sort((a, b) => {
+    const aTime = telegramCache[a.username.toLowerCase().replace(/^@/, '')]?.timestamp || 0;
+    const bTime = telegramCache[b.username.toLowerCase().replace(/^@/, '')]?.timestamp || 0;
+    return aTime - bTime;
+  });
 
-  // 2. TIER 2: CRITICAL SECOND (concurrency 4, 30ms)
+  const priorityToFetch = options?.force ? sortedPriority.slice(0, 4) : sortedPriority.slice(0, 3);
+  await fetchChannelTier(priorityToFetch, 2, 300);
+
+  // Populate remaining priority channels from cache if available
+  sortedPriority.slice(priorityToFetch.length).forEach(ch => {
+    const cleanU = ch.username.toLowerCase().replace(/^@/, '');
+    if (!sourceStatus[cleanU]) {
+      const cached = telegramCache[cleanU];
+      const rState = channelReaderStates[cleanU];
+      if (cached && cached.messages.length > 0) {
+        cached.messages.forEach(m => allMessagesMap.set(m.id, m));
+        const latestMsg = cached.messages[cached.messages.length - 1];
+        sourceStatus[cleanU] = {
+          channel: ch.username,
+          title: ch.title,
+          ok: true,
+          count: cached.messages.length,
+          lastMessageText: latestMsg?.text,
+          lastMessageTimeIso: latestMsg?.timeIso,
+          lastMessageId: latestMsg?.id,
+          lastCheckTimestamp: cached.timestamp,
+          lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached.timestamp,
+          preferredReader: rState?.preferredReader || 'jina_html',
+          activeReader: rState?.activeReader || 'jina_html',
+          fallbackReader: rState?.fallbackReader,
+          isFallbackActive: !!rState?.fallbackReader,
+          tier: ch.tier,
+          hasWebPreview: true,
+          statusCategory: 'healthy',
+          health: 'ONLINE'
+        };
+      } else {
+        sourceStatus[cleanU] = {
+          channel: ch.username,
+          title: ch.title,
+          ok: false,
+          count: 0,
+          lastCheckTimestamp: now,
+          lastSuccessfulReadTs: 0,
+          preferredReader: rState?.preferredReader || 'jina_html',
+          activeReader: rState?.activeReader || 'jina_html',
+          error: 'Очікує черги опитування',
+          tier: ch.tier,
+          hasWebPreview: true,
+          statusCategory: 'unavailable',
+          health: 'FAILED'
+        };
+      }
+    }
+  });
+
+  // 2. TIER 2: CRITICAL SECOND (concurrency 2, 300ms, batch of 3)
   if (!options?.signal?.aborted) {
-    await fetchChannelTier(criticalChannels, 4, 30);
+    const sortedCritical = [...criticalChannels].sort((a, b) => {
+      const aTime = telegramCache[a.username.toLowerCase().replace(/^@/, '')]?.timestamp || 0;
+      const bTime = telegramCache[b.username.toLowerCase().replace(/^@/, '')]?.timestamp || 0;
+      return aTime - bTime;
+    });
+    const criticalToFetch = options?.force ? sortedCritical.slice(0, 3) : sortedCritical.slice(0, 2);
+    await fetchChannelTier(criticalToFetch, 2, 300);
+
+    sortedCritical.slice(criticalToFetch.length).forEach(ch => {
+      const cleanU = ch.username.toLowerCase().replace(/^@/, '');
+      if (!sourceStatus[cleanU]) {
+        const cached = telegramCache[cleanU];
+        const rState = channelReaderStates[cleanU];
+        if (cached && cached.messages.length > 0) {
+          cached.messages.forEach(m => allMessagesMap.set(m.id, m));
+          const latestMsg = cached.messages[cached.messages.length - 1];
+          sourceStatus[cleanU] = {
+            channel: ch.username,
+            title: ch.title,
+            ok: true,
+            count: cached.messages.length,
+            lastMessageText: latestMsg?.text,
+            lastMessageTimeIso: latestMsg?.timeIso,
+            lastMessageId: latestMsg?.id,
+            lastCheckTimestamp: cached.timestamp,
+            lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached.timestamp,
+            preferredReader: rState?.preferredReader || 'jina_html',
+            activeReader: rState?.activeReader || 'jina_html',
+            fallbackReader: rState?.fallbackReader,
+            isFallbackActive: !!rState?.fallbackReader,
+            tier: ch.tier,
+            hasWebPreview: true,
+            statusCategory: 'healthy',
+            health: 'ONLINE'
+          };
+        } else {
+          sourceStatus[cleanU] = {
+            channel: ch.username,
+            title: ch.title,
+            ok: false,
+            count: 0,
+            lastCheckTimestamp: now,
+            lastSuccessfulReadTs: 0,
+            preferredReader: rState?.preferredReader || 'jina_html',
+            activeReader: rState?.activeReader || 'jina_html',
+            error: 'Очікує черги опитування',
+            tier: ch.tier,
+            hasWebPreview: true,
+            statusCategory: 'unavailable',
+            health: 'FAILED'
+          };
+        }
+      }
+    });
   }
 
-  // 3. TIER 3: REGIONAL BATCH THIRD
+  // 3. TIER 3: REGIONAL BATCH THIRD (concurrency 2, 300ms)
   if (!options?.signal?.aborted) {
-    await fetchChannelTier(selectedBatch, 4, 30);
+    await fetchChannelTier(selectedBatch.slice(0, 2), 2, 300);
   }
 
   // Populate remaining regional channels from cache
@@ -1504,8 +1630,8 @@ export async function fetchAllTelegramFeeds(
           lastMessageId: latestMsg?.id,
           lastCheckTimestamp: cached.timestamp,
           lastSuccessfulReadTs: rState?.lastSuccessfulReadTs || cached.timestamp,
-          preferredReader: rState?.preferredReader || 'cors_sh',
-          activeReader: rState?.activeReader || 'cors_sh',
+          preferredReader: rState?.preferredReader || 'jina_html',
+          activeReader: rState?.activeReader || 'jina_html',
           fallbackReader: rState?.fallbackReader,
           isFallbackActive: !!rState?.fallbackReader,
           tier: ch.tier,
@@ -1521,8 +1647,8 @@ export async function fetchAllTelegramFeeds(
           count: 0,
           lastCheckTimestamp: now,
           lastSuccessfulReadTs: 0,
-          preferredReader: rState?.preferredReader || 'cors_sh',
-          activeReader: rState?.activeReader || 'cors_sh',
+          preferredReader: rState?.preferredReader || 'jina_html',
+          activeReader: rState?.activeReader || 'jina_html',
           error: 'Очікує черги опитування',
           tier: ch.tier,
           hasWebPreview: true,

@@ -2045,7 +2045,7 @@ export default function HomePage() {
                   const st = sourceStatuses[cleanU];
                   const isHealthy = st?.statusCategory === 'healthy' || (st && st.ok);
                   const isFallback = st?.isFallbackActive;
-                  const activeReader = st?.activeReader || 'Cors.sh Proxy';
+                  const activeReader = st?.activeReader || 'Jina Proxy';
                   const lastReadTime = st?.lastSuccessfulReadTs ? formatTimeHHMMSS(st.lastSuccessfulReadTs) : '—';
                   const lastMsgTime = st?.lastMessageTimeIso ? formatTimeHHMMSS(st.lastMessageTimeIso) : '—';
 
