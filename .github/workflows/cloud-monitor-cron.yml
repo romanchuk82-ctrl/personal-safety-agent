@@ -11,12 +11,28 @@ jobs:
     runs-on: ubuntu-latest
     name: Cloud Monitoring Runner
     steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Execute Autonomous Monitoring Cycles
         run: |
-          for i in 1 2 3 4 5; do
-            echo "Triggering cloud cycle $i at $(date -u)..."
-            curl -fSL -A "PersonalSafetyAgent-Cron/1.0" "https://personal-safety-backend.lydian-steed.workers.dev/api/monitoring/cycle"
-            if [ $i -lt 5 ]; then
-              sleep 60
-            fi
-          done
+          node -e "
+            async function loop() {
+              for (let i = 1; i <= 5; i++) {
+                console.log('Triggering cloud cycle ' + i + ' at ' + new Date().toISOString());
+                const res = await fetch('https://personal-safety-backend.lydian-steed.workers.dev/api/monitoring/cycle', {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                    'Accept': 'application/json'
+                  }
+                });
+                console.log('Response status:', res.status);
+                const data = await res.json();
+                console.log('Cycle result:', data?.success, 'health:', data?.health?.sources);
+                if (i < 5) await new Promise(r => setTimeout(r, 60000));
+              }
+            }
+            loop();
+          "
