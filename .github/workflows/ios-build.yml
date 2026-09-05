@@ -5,12 +5,11 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-ios:
     runs-on: macos-14
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,7 +34,7 @@ jobs:
             -scheme PersonalSafetyAgent \
             -configuration Release \
             -destination "generic/platform=iOS" \
-            -archivePath build/PersonalSafetyAgent.xcarchive \
+            -archivePath ./build/PersonalSafetyAgent.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             archive
@@ -43,7 +42,7 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -r build/PersonalSafetyAgent.xcarchive/Products/Applications/PersonalSafetyAgent.app Payload/
+          cp -r ./build/PersonalSafetyAgent.xcarchive/Products/Applications/PersonalSafetyAgent.app Payload/
           zip -r PersonalSafetyAgent.ipa Payload
           ls -lh PersonalSafetyAgent.ipa
 
@@ -55,19 +54,19 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub Release with IPA
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view v1.0.0-ios && RELEASE_EXISTS=true || RELEASE_EXISTS=false
-          if [ "$RELEASE_EXISTS" = "true" ]; then
-            gh release upload v1.0.0-ios PersonalSafetyAgent.ipa --clobber
-          else
-            gh release create v1.0.0-ios PersonalSafetyAgent.ipa \
-              --title "Personal Safety Agent for iPhone v1.0.0" \
-              --notes "🚀 **Personal Safety Agent для iPhone (Ready-to-Install .ipa)**
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/main')
+        with:
+          tag_name: v1.0.0-ios
+          name: "Personal Safety Agent for iPhone v1.0.0"
+          body: |
+            🚀 **Personal Safety Agent для iPhone (Ready-to-Install .ipa)**
 
-Встановлюється в 1 клік на будь-який iPhone без Mac через:
-* **Sideloadly** (Windows / macOS)
-* **AltStore** (Windows / macOS)
-* **TrollStore / Scarlet / SideStore** (безпосередньо на iPhone)"
-          fi
+            Встановлюється в 1 клік на будь-який iPhone без Mac через:
+            - **Sideloadly** (Windows / macOS)
+            - **AltStore** (Windows / macOS)
+            - **TrollStore / Scarlet / SideStore** (безпосередньо на iPhone)
+          files: PersonalSafetyAgent.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
