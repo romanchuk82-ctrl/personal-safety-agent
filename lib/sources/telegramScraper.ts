@@ -985,8 +985,9 @@ export async function fetchChannelMessages(
   const now = Date.now();
   const cached = telegramCache[channel.username];
 
-  // Quick 15-second cache per channel to prevent spamming unless force refresh is requested
-  if (!options?.force && cached && (now - cached.timestamp) < 15000) {
+  // Rate-limit safety: 15s normal cycle, 6s forced refresh threshold to prevent proxy rate-limiting
+  const minInterval = options?.force ? 6000 : 15000;
+  if (cached && (now - cached.timestamp) < minInterval) {
     return { messages: cached.messages };
   }
 
@@ -1135,15 +1136,15 @@ export async function fetchAllTelegramFeeds(
     ...selectedBatch
   ];
 
-  // Concurrently fetch this cycle's channels with concurrency throttling (chunks of 4)
+  // Concurrently fetch this cycle's channels with concurrency throttling (chunks of 3)
   const results: PromiseSettledResult<{ messages: TelegramMessage[]; error?: string }>[] = [];
-  const CONCURRENCY = 4;
+  const CONCURRENCY = 3;
   for (let i = 0; i < channelsToQueryThisCycle.length; i += CONCURRENCY) {
     const chunk = channelsToQueryThisCycle.slice(i, i + CONCURRENCY);
     const chunkResults = await Promise.allSettled(chunk.map(ch => fetchChannelMessages(ch, options)));
     results.push(...chunkResults);
     if (i + CONCURRENCY < channelsToQueryThisCycle.length) {
-      await new Promise(r => setTimeout(r, 60));
+      await new Promise(r => setTimeout(r, 120));
     }
   }
 
