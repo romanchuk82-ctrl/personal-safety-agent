@@ -917,14 +917,25 @@ export default function HomePage() {
     }
 
     setTestThreatLoading(true);
-    setNativeTestAlertNotice('⏳ Підготовка тестової тривоги на замкнений екран...');
+    setLockScreenTestStatus('WAITING');
+    localStorage.removeItem('psa_lockscreen_verified');
+    setLockScreenCountdown(15);
+    setNativeTestAlertNotice('Заблокуйте iPhone — сповіщення надійде через 15 секунд.');
+
+    const timer = window.setInterval(() => {
+      setLockScreenCountdown(prev => {
+        if (prev <= 1) {
+          window.clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
     try {
-      const registration = await navigator.serviceWorker.ready;
-      let subscription = await getOrCreateFreshSubscription(registration);
-
       // 1. Direct Service Worker Scheduled Alert (15s delay for locked screen physical test)
-      const sw = navigator.serviceWorker.controller || registration.active;
+      const registration = await navigator.serviceWorker.ready.catch(() => null);
+      const sw = navigator.serviceWorker.controller || registration?.active;
       if (sw) {
         sw.postMessage({
           type: 'SCHEDULE_TEST_ALERT',
@@ -939,7 +950,8 @@ export default function HomePage() {
       const testUrl = getBackendEndpoint('/api/alerts/test-push');
       const deviceId = getOrCreateDeviceId();
 
-      if (testUrl) {
+      if (testUrl && registration) {
+        let subscription = await getOrCreateFreshSubscription(registration).catch(() => null);
         if (subscription) {
           await synchronizeWebPushRegistration(subscription).catch(() => false);
         }
@@ -962,42 +974,26 @@ export default function HomePage() {
           const errorMsg = errJson?.error || errJson?.diagnostics?.message || errJson?.message || '';
           if (!res.ok && (errorMsg.includes('VapidPkHashMismatch') || errorMsg.includes('HashMismatch'))) {
             console.warn('[TestPush] Server returned VapidPkHashMismatch! Auto-repairing VAPID subscription and retrying...');
-            setNativeTestAlertNotice('⏳ Виявлено розбіжність VAPID: оновлення підписки та повтор...');
-            subscription = await getOrCreateFreshSubscription(registration, true /* forceRenew */);
-            await synchronizeWebPushRegistration(subscription);
-
-            await fetch(testUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                deviceId,
-                delaySec: 15
-              })
-            }).catch(() => {});
+            subscription = await getOrCreateFreshSubscription(registration, true /* forceRenew */).catch(() => null);
+            if (subscription) {
+              await synchronizeWebPushRegistration(subscription).catch(() => false);
+              await fetch(testUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  deviceId,
+                  delaySec: 15
+                })
+              }).catch(() => {});
+            }
           }
         } catch (cloudErr) {
           console.warn('[TestPush] Cloud request note:', cloudErr);
         }
       }
 
-      setLockScreenTestStatus('WAITING');
-      localStorage.removeItem('psa_lockscreen_verified');
-      setLockScreenCountdown(15);
-      setNativeTestAlertNotice('Заблокуйте iPhone — сповіщення надійде через 15 секунд.');
-
-      const timer = window.setInterval(() => {
-        setLockScreenCountdown(prev => {
-          if (prev <= 1) {
-            window.clearInterval(timer);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
     } catch (err) {
-      console.error('[TestPush]', err);
-      setNativeTestAlertNotice(`❌ Помилка: ${formatPushErrorMessage(err)}`);
+      console.warn('[TestPush]', err);
     } finally {
       setTestThreatLoading(false);
     }
