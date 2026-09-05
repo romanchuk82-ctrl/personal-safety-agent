@@ -13,7 +13,7 @@ export class DeviceManager {
     if (customStorageFile) {
       this.storageFile = customStorageFile;
       this.loadFromDisk();
-    } else if (process.env.NODE_ENV !== 'test') {
+    } else if (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT && !process.argv.includes('--test')) {
       this.storageFile = process.env.DEVICE_STORAGE_FILE
         ? path.resolve(process.env.DEVICE_STORAGE_FILE)
         : path.resolve(process.cwd(), 'data', 'devices.json');
