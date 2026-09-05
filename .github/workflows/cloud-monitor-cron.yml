@@ -15,7 +15,7 @@ jobs:
         run: |
           for i in 1 2 3 4 5; do
             echo "Triggering cloud cycle $i at $(date -u)..."
-            curl -s -f "https://personal-safety-backend.lydian-steed.workers.dev/api/monitoring/cycle"
+            curl -fSL -A "PersonalSafetyAgent-Cron/1.0" "https://personal-safety-backend.lydian-steed.workers.dev/api/monitoring/cycle"
             if [ $i -lt 5 ]; then
               sleep 60
             fi
