@@ -4,8 +4,8 @@ import { WebPushSubscription, Env } from './types.js';
 let vapidConfigured = false;
 
 export function configureVapid(env: Env): void {
-  const publicKey = env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII';
-  const privateKey = env.VAPID_PRIVATE_KEY || '-iJ4fJhTLRfiJ_YfkSmBzeXpPqJEP97e67Mi4lue2dY';
+  const publicKey = env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk';
+  const privateKey = env.VAPID_PRIVATE_KEY;
   const subject = env.VAPID_SUBJECT || 'mailto:security@personal-safety.app';
 
   if (!vapidConfigured && publicKey && privateKey) {

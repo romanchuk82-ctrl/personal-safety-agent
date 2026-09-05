@@ -189,7 +189,7 @@ async function performFetch(token: string, options: FetchActiveAlertsOptions): P
 }
 
 export async function fetchActiveAlerts(token?: string, options: FetchActiveAlertsOptions = {}): Promise<FetchResult> {
-  const apiToken = token || process.env.ALERTS_API_TOKEN || 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
+  const apiToken = token || process.env.ALERTS_API_TOKEN || '';
   // Overlapping timers share only the active network request. Completed results are
   // never cached, so manual refresh always reaches the official source.
   if (inFlightFetch) {

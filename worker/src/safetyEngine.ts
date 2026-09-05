@@ -5,45 +5,149 @@ import { sendWebPush } from './webPush.js';
 
 export class SafetyEngine {
   /**
-   * Fetches official active air-raid alerts from alerts.in.ua
+   * Fetches official active air-raid alerts (alerts.in.ua with open feed fallback)
    */
   public static async fetchOfficialAlerts(env: Env): Promise<{ success: boolean; alerts: any[] }> {
     const token = env.ALERTS_API_TOKEN;
-    if (!token) return { success: false, alerts: [] };
+    
+    // Attempt 1: alerts.in.ua API (if token provided)
+    if (token) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch('https://api.alerts.in.ua/v1/alerts/active.json', {
+          headers: { 'X-API-Token': token },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
 
+        if (res.ok) {
+          const data: any = await res.json();
+          const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
+          return { success: true, alerts };
+        }
+      } catch (err: any) {
+        console.warn('[SafetyEngine] alerts.in.ua fetch failed:', err?.message || err);
+      }
+    }
+
+    // Attempt 2: Live Ukrainian aerial alerts open feed
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-      const res = await fetch('https://api.alerts.in.ua/v1/alerts/active.json', {
-        headers: { 'X-API-Token': token },
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch('https://ubilling.net.ua/aerialalerts/', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json'
+        },
         signal: controller.signal
       });
       clearTimeout(timeoutId);
 
-      if (!res.ok) {
-        console.warn(`[SafetyEngine] alerts.in.ua returned HTTP ${res.status}`);
-        return { success: false, alerts: [] };
+      if (res.ok) {
+        const data: any = await res.json();
+        if (data?.states) {
+          const activeAlerts = Object.entries(data.states)
+            .filter(([_, val]: any) => val?.alertnow === true)
+            .map(([locationTitle, val]: any) => ({
+              location_title: locationTitle,
+              alert_type: 'air_raid',
+              started_at: val?.changed || new Date().toISOString()
+            }));
+          return { success: true, alerts: activeAlerts };
+        }
       }
-
-      const data: any = await res.json();
-      const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
-      return { success: true, alerts };
     } catch (err: any) {
-      console.warn('[SafetyEngine] alerts.in.ua fetch failed:', err?.message || err);
-      return { success: false, alerts: [] };
+      console.warn('[SafetyEngine] Ubilling open alerts feed failed:', err?.message || err);
     }
+
+    // Attempt 3: Jina proxy for ubilling open alerts feed
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch('https://r.jina.ai/https://ubilling.net.ua/aerialalerts/', {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const text = await res.text();
+        const jsonMatch = text.match(/\{[\s\S]*"states"[\s\S]*\}/);
+        if (jsonMatch) {
+          const data: any = JSON.parse(jsonMatch[0]);
+          if (data?.states) {
+            const activeAlerts = Object.entries(data.states)
+              .filter(([_, val]: any) => val?.alertnow === true)
+              .map(([locationTitle, val]: any) => ({
+                location_title: locationTitle,
+                alert_type: 'air_raid',
+                started_at: val?.changed || new Date().toISOString()
+              }));
+            return { success: true, alerts: activeAlerts };
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[SafetyEngine] Jina open alerts feed failed:', err?.message || err);
+    }
+
+    return { success: false, alerts: [] };
+  }
+
+  /**
+   * Fetches real-time OSINT Telegram feeds (e.g. kievreal1 via proxy)
+   */
+  public static async fetchTelegramFeeds(env: Env): Promise<{ success: boolean; messagesCount: number }> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch('https://r.jina.ai/https://t.me/s/kievreal1', {
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.length > 100) {
+          return { success: true, messagesCount: 1 };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[SafetyEngine] Telegram feed fetch failed:', err?.message || err);
+    }
+
+    // Fallback: Direct public web channel
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch('https://t.me/s/kievreal1', {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        return { success: true, messagesCount: 1 };
+      }
+    } catch (err: any) {
+      console.warn('[SafetyEngine] Telegram direct fetch failed:', err?.message || err);
+    }
+
+    return { success: false, messagesCount: 0 };
   }
 
   /**
    * Evaluates active threats against registered devices and dispatches necessary alerts
    */
-  public static async runCycle(env: Env): Promise<{ evaluatedDevices: number; alertsSent: number }> {
+  public static async runCycle(env: Env): Promise<{ evaluatedDevices: number; alertsSent: number; health: MonitoringHealth }> {
     const now = Date.now();
     console.log(`[SafetyEngine] Starting autonomous cloud cycle at ${new Date(now).toISOString()}`);
 
-    // 1. Fetch official alerts
-    const officialRes = await this.fetchOfficialAlerts(env);
+    // 1. Fetch official alerts and Telegram feeds
+    const [officialRes, telegramRes] = await Promise.all([
+      this.fetchOfficialAlerts(env),
+      this.fetchTelegramFeeds(env)
+    ]);
 
     // 2. Load stored threats and devices from KV
     const activeThreats = await KvStorage.getActiveThreats(env);
@@ -112,18 +216,23 @@ export class SafetyEngine {
       }
     }
 
-    // Update monitoring health state in KV
+    // 3. Update monitoring health state with recent cycle history
+    const prevHealth = await KvStorage.getHealth(env);
+    const existingRecent = Array.isArray(prevHealth?.recentCycles) ? prevHealth.recentCycles : [];
+    const recentCycles = [now, ...existingRecent.filter(ts => ts !== now)].slice(0, 10);
+
     const health: MonitoringHealth = {
       lastCycleTimestamp: now,
       lastCycleAgeSec: 0,
       officialAlertsStatus: officialRes.success ? 'healthy' : 'degraded',
-      telegramFeedsStatus: 'healthy',
+      telegramFeedsStatus: telegramRes.success ? 'healthy' : 'degraded',
       lastEventIngestedTs: now,
       activeThreatsCount: activeThreats.length,
-      registeredDevicesCount: devices.length
+      registeredDevicesCount: devices.length,
+      recentCycles
     };
     await KvStorage.saveHealth(env, health);
 
-    return { evaluatedDevices: devices.length, alertsSent };
+    return { evaluatedDevices: devices.length, alertsSent, health };
   }
 }

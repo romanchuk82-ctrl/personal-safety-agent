@@ -1,0 +1,22 @@
+name: 24/7 Cloud Monitoring Cron
+
+on:
+  schedule:
+    # Run every 5 minutes (fastest reliable cadence at /year)
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-monitoring-cycles:
+    runs-on: ubuntu-latest
+    name: Cloud Monitoring Runner
+    steps:
+      - name: Execute Autonomous Monitoring Cycles
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "Triggering cloud cycle $i at $(date -u)..."
+            curl -s -f "https://personal-safety-backend.lydian-steed.workers.dev/api/monitoring/cycle"
+            if [ $i -lt 5 ]; then
+              sleep 60
+            fi
+          done

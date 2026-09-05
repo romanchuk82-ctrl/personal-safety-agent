@@ -85,6 +85,7 @@ export interface MonitoringHealth {
   lastEventIngestedTs: number;
   activeThreatsCount: number;
   registeredDevicesCount: number;
+  recentCycles?: number[];
 }
 
 export interface Env {

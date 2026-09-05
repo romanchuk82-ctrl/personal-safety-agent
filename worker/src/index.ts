@@ -55,7 +55,8 @@ export default {
           },
           activeThreatsCount: health.activeThreatsCount,
           registeredDevicesCount: health.registeredDevicesCount,
-          persistenceReady: KvStorage.isPersistenceReady(env)
+          persistenceReady: KvStorage.isPersistenceReady(env),
+          recentCycles: health.recentCycles || []
         });
       }
 

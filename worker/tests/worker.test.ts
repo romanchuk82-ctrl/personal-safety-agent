@@ -8,8 +8,8 @@ import { ThreatEvent, LocationPayload, Env } from '../src/types.js';
 const mockEnv: Env = {
   PSA_STORAGE: null as any,
   ENVIRONMENT: 'test',
-  NEXT_PUBLIC_VAPID_PUBLIC_KEY: 'BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII',
-  VAPID_PRIVATE_KEY: '-iJ4fJhTLRfiJ_YfkSmBzeXpPqJEP97e67Mi4lue2dY',
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: 'BFM9HkzYgwAYdTY5VYhj_Gfm39qhGL5vs7vy9iuj1-vBt8eXFqH9j0wh7qgh2_ScpX-LWhIKfHogc7wgSl0flRk',
+  VAPID_PRIVATE_KEY: 'mock_test_vapid_private_key',
   VAPID_SUBJECT: 'mailto:security@personal-safety.app'
 };
 

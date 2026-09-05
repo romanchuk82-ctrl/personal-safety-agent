@@ -14,10 +14,11 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_VAPID_PUBLIC_KEY
-        value: BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII
+        sync: false
       - key: VAPID_PRIVATE_KEY
-        value: -iJ4fJhTLRfiJ_YfkSmBzeXpPqJEP97e67Mi4lue2dY
+        sync: false
       - key: VAPID_SUBJECT
         value: mailto:security@personal-safety.app
       - key: ALERTS_API_TOKEN
-        value: f2184a0fd1d14c5aa291368854cbe654d178883fab2203
+        sync: false
+
