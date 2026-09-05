@@ -2415,10 +2415,10 @@ export default function HomePage() {
               {/* 1. SERVER 24/7 */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">SERVER 24/7:</span>
-                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-emerald-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
-                  {backendServerOnline === true ? '🟢 CLOUD VERIFIED' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
+                <span className={'font-bold mt-0.5 ' + (backendServerOnline === true ? 'text-amber-400' : backendServerOnline === false ? 'text-rose-400' : 'text-amber-400')}>
+                  {backendServerOnline === true ? '🟡 ONLINE (CRON PENDING)' : backendServerOnline === false ? '🔴 OFFLINE' : '🟡 ПЕРЕВІРКА'}
                 </span>
-                <span className="text-[8px] text-slate-500">Cloudflare Workers Edge</span>
+                <span className="text-[8px] text-slate-500">Cloudflare Free: 0 Cron Triggers</span>
               </div>
 
               {/* 2. LOCAL PC */}
