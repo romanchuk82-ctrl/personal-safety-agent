@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "npx --yes tsx --test tests/locationValidator.test.ts tests/threatClassifier.test.ts tests/lifecycleAndOfficialAlerts.test.ts tests/officialAlertsFetch.test.ts tests/sourceHealth.test.ts tests/manualRefreshAndStyle.test.ts tests/manualRefreshTimeout.test.ts"
+    "test": "npx --yes tsx --test tests/locationValidator.test.ts tests/threatClassifier.test.ts tests/lifecycleAndOfficialAlerts.test.ts tests/officialAlertsFetch.test.ts tests/sourceHealth.test.ts tests/manualRefreshAndStyle.test.ts tests/manualRefreshTimeout.test.ts tests/officialAlertsReconciliation.test.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

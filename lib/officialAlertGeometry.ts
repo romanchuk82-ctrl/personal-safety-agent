@@ -51,10 +51,60 @@ function canonicalName(value?: string): string {
     .replace(/\([^)]*\)/g, '')
     .replace(/^м\.\s*/u, '')
     .replace(/^місто\s+/u, '')
-    .replace(/\s+(територіальна\s+громада|міська\s+громада|сільська\s+громада|селищна\s+громада|громада|район|область)$/u, '')
+    .replace(/^село\s+/u, '')
+    .replace(/^смт\s+/u, '')
+    .replace(/^селище\s+/u, '')
+    .replace(/\s+(територіальна\s+громада|міська\s+громада|сільська\s+громада|селищна\s+громада|громада|район|область)$/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+function canonicalOblast(value?: string): string {
+  return canonicalName(value).replace(/\s+область$/u, '').trim();
+}
+
+// City name to hromada root mapper for Ukrainian cities
+const CITY_TO_HROMADA_STEMS: Record<string, string> = {
+  'харків': 'харківськ',
+  'дніпро': 'дніпровськ',
+  'запоріжжя': 'запорізьк',
+  'кривий ріг': 'криворізьк',
+  'одеса': 'одеськ',
+  'миколаїв': 'миколаївськ',
+  'херсон': 'херсонськ',
+  'полтава': 'полтавськ',
+  'чернігів': 'чернігівськ',
+  'суми': 'сумськ',
+  'черкаси': 'черкаськ',
+  'житомир': 'житомирськ',
+  'вінниця': 'вінницьк',
+  'рівне': 'рівненськ',
+  'хмельницький': 'хмельницьк',
+  'луцьк': 'луцьк',
+  'тернопіль': 'тернопільськ',
+  'івано-франківськ': 'івано-франківськ',
+  'ужгород': 'ужгородськ',
+  'чернівці': 'чернівецьк',
+  'львів': 'львівськ',
+  'нікополь': 'нікопольськ',
+  'павлоград': 'павлоградськ',
+  'світловодськ': 'світловодськ',
+  'кременчук': 'кременчуцьк',
+  'луганськ': 'луганськ',
+  'донецьк': 'донецьк',
+  'маріуполь': 'маріупольськ',
+  'краматорськ': 'краматорськ',
+  'словʼянськ': 'словʼянськ',
+  'бахмут': 'бахмутськ'
+};
+
+// Known renamed districts (2024 decommunization)
+const RENAMED_RAIONS: Record<string, string> = {
+  'самарівський': 'новомосковський',
+  'новомосковський': 'самарівський',
+  'берестинський': 'красноградський',
+  'красноградський': 'берестинський'
+};
 
 export function getOfficialGeometryDescriptor(alert: RawAlert): OfficialGeometryDescriptor | null {
   const uid = String(alert.location_uid || '').trim();
@@ -192,49 +242,95 @@ async function loadDataset(filename: 'ukraine_oblasts.json' | 'ukraine_raions.js
   return data;
 }
 
-function findFeatureInCollection(
+function matchAlertToFeature(
   alert: RawAlert,
   descriptor: OfficialGeometryDescriptor | null,
-  collection: GeoJsonFeatureCollection
-): GeoJsonFeature | null {
-  const uid = String(alert.location_uid || '').trim();
-  const canonTitle = canonicalName(alert.location_title);
+  datasets: { oblasts: GeoJsonFeatureCollection; raions: GeoJsonFeatureCollection; hromadas: GeoJsonFeatureCollection }
+): { feature: GeoJsonFeature; geometryKey: string } | null {
+  const alertType = alert.location_type;
+  const alertUid = String(alert.location_uid || '').trim();
+  const alertCanonTitle = canonicalName(alert.location_title);
+  const alertCanonOblast = canonicalOblast(alert.location_oblast);
 
-  // 1. Direct UID match
-  if (uid) {
-    const directUid = collection.features.find(f => {
-      const fUid = String(f.properties?.uid || f.properties?.id || '').trim();
-      return fUid === uid;
-    });
-    if (directUid) return directUid;
+  // 0. Special case: м. Київ (Oblast UID 31 or title Kyiv)
+  if (alertUid === '31' || alertCanonTitle === 'київ' || alertCanonOblast === 'київ') {
+    const kyiv = datasets.oblasts.features.find(f => f.properties.uid === '31' || canonicalName(f.properties.name) === 'київ');
+    if (kyiv) return { feature: kyiv, geometryKey: 'oblast:31' };
   }
 
-  // 2. GeometryUid match for cities (e.g. 5351 -> 351)
-  if (descriptor?.geometryUid) {
-    const geomMatch = collection.features.find(f => {
-      const fUid = String(f.properties?.uid || f.properties?.id || '').trim();
-      return fUid === descriptor.geometryUid;
+  // 1. OBLAST ALERTS
+  if (alertType === 'oblast') {
+    const obMatch = datasets.oblasts.features.find(f => {
+      const fCanon = canonicalName(f.properties.name);
+      return fCanon === alertCanonTitle || (f.properties.uid && f.properties.uid === alertUid);
     });
-    if (geomMatch) return geomMatch;
+    if (obMatch) {
+      const uid = obMatch.properties.uid || alertUid;
+      return { feature: obMatch, geometryKey: `oblast:${uid}` };
+    }
+    return null;
   }
 
-  // 3. Special case for м. Київ
-  if (alert.location_uid === '31' || canonTitle === 'київ') {
-    const kyiv = collection.features.find(f => {
-      const fUid = String(f.properties?.uid || f.properties?.id || '').trim();
-      const fName = canonicalName(f.properties?.name || '');
-      return fUid === '31' || fName === 'київ';
+  // 2. RAION ALERTS
+  if (alertType === 'raion') {
+    const raionMatch = datasets.raions.features.find(f => {
+      const fNameCanon = canonicalName(f.properties.name);
+      const fNormCanon = canonicalName(f.properties.normalizedName);
+      if (fNameCanon === alertCanonTitle || fNormCanon === alertCanonTitle) return true;
+      if (RENAMED_RAIONS[alertCanonTitle] && (fNameCanon === RENAMED_RAIONS[alertCanonTitle] || fNormCanon === RENAMED_RAIONS[alertCanonTitle])) return true;
+      return false;
     });
-    if (kyiv) return kyiv;
+    if (raionMatch) {
+      const uid = raionMatch.properties.uid || raionMatch.properties.id || alertUid;
+      return { feature: raionMatch, geometryKey: `raion:${uid}` };
+    }
+    return null;
   }
 
-  // 4. Canonical name match
-  if (canonTitle) {
-    const nameMatch = collection.features.find(f => {
-      const fName = canonicalName(f.properties?.name || f.properties?.hromada || '');
-      return fName === canonTitle;
+  // 3. HROMADA & CITY ALERTS
+  if (alertType === 'hromada' || alertType === 'city') {
+    if (!alertCanonOblast) return null;
+
+    // Filter candidate hromadas strictly within the specified oblast
+    const candidates = datasets.hromadas.features.filter(f => {
+      const fOblastCanon = canonicalOblast(f.properties.oblast);
+      return fOblastCanon === alertCanonOblast;
     });
-    if (nameMatch) return nameMatch;
+
+    if (candidates.length === 0) return null;
+
+    // Step A: Exact canonical match on hromada name
+    const exactMatch = candidates.find(f => {
+      const fHromadaCanon = canonicalName(f.properties.hromada || f.properties.name);
+      return fHromadaCanon === alertCanonTitle;
+    });
+    if (exactMatch) {
+      const uid = exactMatch.properties.uid || exactMatch.properties.id || alertUid;
+      return { feature: exactMatch, geometryKey: `hromada:${uid}` };
+    }
+
+    // Step B: City stem match (e.g. 'кривий ріг' -> 'криворізьк', 'дніпро' -> 'дніпровськ')
+    const cityStem = CITY_TO_HROMADA_STEMS[alertCanonTitle] || alertCanonTitle;
+    const stemMatch = candidates.find(f => {
+      const fHromadaCanon = canonicalName(f.properties.hromada || f.properties.name);
+      return fHromadaCanon.startsWith(cityStem);
+    });
+    if (stemMatch) {
+      const uid = stemMatch.properties.uid || stemMatch.properties.id || alertUid;
+      return { feature: stemMatch, geometryKey: `hromada:${uid}` };
+    }
+
+    // Step C: Prefix match within the same oblast
+    const prefixMatch = candidates.find(f => {
+      const fHromadaCanon = canonicalName(f.properties.hromada || f.properties.name);
+      return fHromadaCanon.startsWith(alertCanonTitle) || alertCanonTitle.startsWith(fHromadaCanon);
+    });
+    if (prefixMatch) {
+      const uid = prefixMatch.properties.uid || prefixMatch.properties.id || alertUid;
+      return { feature: prefixMatch, geometryKey: `hromada:${uid}` };
+    }
+
+    return null;
   }
 
   return null;
@@ -248,7 +344,7 @@ export interface OfficialAlertsGeoJsonResult {
 export async function buildOfficialAlertsGeoJson(alerts: RawAlert[]): Promise<OfficialAlertsGeoJsonResult> {
   const activeAlerts = getActiveAirRaidAlerts(alerts);
   if (activeAlerts.length === 0) {
-    return { geoJson: null, diagnostic: EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC };
+    return { geoJson: null, diagnostic: EMPTY_OFFICIAL_GEONT_DIAGNOSTIC() };
   }
 
   const [oblasts, raions, hromadas] = await Promise.all([
@@ -257,42 +353,32 @@ export async function buildOfficialAlertsGeoJson(alerts: RawAlert[]): Promise<Of
     loadDataset('ukraine_hromadas.json')
   ]);
 
+  const datasets = { oblasts, raions, hromadas };
   const renderedFeatures: GeoJsonFeature[] = [];
   const renderedKeys = new Set<string>();
   const matches: OfficialGeometryMatch[] = [];
 
   for (const alert of activeAlerts) {
     const descriptor = getOfficialGeometryDescriptor(alert);
-    const geometryKey = descriptor?.geometryKey || `${alert.location_type}:${alert.location_uid}`;
+    const matchResult = matchAlertToFeature(alert, descriptor, datasets);
 
-    let matchedFeature: GeoJsonFeature | null = null;
-    if (alert.location_type === 'oblast') {
-      matchedFeature = findFeatureInCollection(alert, descriptor, oblasts);
-    } else if (alert.location_type === 'raion') {
-      matchedFeature = findFeatureInCollection(alert, descriptor, raions);
-    } else if (alert.location_type === 'hromada') {
-      matchedFeature = findFeatureInCollection(alert, descriptor, hromadas);
-    } else if (alert.location_type === 'city') {
-      matchedFeature = findFeatureInCollection(alert, descriptor, hromadas) ||
-                       findFeatureInCollection(alert, descriptor, oblasts);
-    }
+    const matched = Boolean(matchResult);
+    const geometryKey = matchResult?.geometryKey || `${alert.location_type}:${alert.location_uid}`;
+    const rendered = Boolean(matched && matchResult && !renderedKeys.has(geometryKey));
 
-    const matched = Boolean(matchedFeature);
-    const rendered = Boolean(matched && !renderedKeys.has(geometryKey));
-
-    if (rendered && matchedFeature) {
+    if (rendered && matchResult) {
       renderedKeys.add(geometryKey);
       renderedFeatures.push({
         type: 'Feature',
         properties: {
-          ...matchedFeature.properties,
+          ...matchResult.feature.properties,
           officialAlert: true,
           sourceId: String(alert.location_uid),
           sourceType: alert.location_type,
           zoneName: alert.location_title,
           geometryKey
         },
-        geometry: matchedFeature.geometry
+        geometry: matchResult.feature.geometry
       });
     }
 
@@ -324,6 +410,17 @@ export async function buildOfficialAlertsGeoJson(alerts: RawAlert[]): Promise<Of
   };
 }
 
+function EMPTY_OFFICIAL_GEONT_DIAGNOSTIC(): OfficialAlertGeometryDiagnostic {
+  return {
+    activeZoneCount: 0,
+    matchedGeometryCount: 0,
+    unmatchedGeometryCount: 0,
+    renderedGeometryCount: 0,
+    matches: [],
+    unmatched: []
+  };
+}
+
 export async function buildOfficialAlertsSvgOverlay(alerts: RawAlert[]): Promise<{
   svg: SVGSVGElement | null;
   diagnostic: OfficialAlertGeometryDiagnostic;
@@ -337,4 +434,3 @@ export function __clearOfficialGeometryCacheForTests(): void {
   cachedRaions = null;
   cachedHromadas = null;
 }
-

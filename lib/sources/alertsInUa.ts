@@ -183,10 +183,14 @@ export async function fetchActiveAlerts(token?: string, options: FetchActiveAler
 }
 
 function canonicalName(value?: string): string {
-  return (value || '').toLocaleLowerCase('uk-UA')
+  return (value || '')
+    .toLocaleLowerCase('uk-UA')
     .replace(/\([^)]*\)/g, '')
     .replace(/^м\.\s*/u, '')
     .replace(/^місто\s+/u, '')
+    .replace(/^село\s+/u, '')
+    .replace(/^смт\s+/u, '')
+    .replace(/\s+(територіальна\s+громада|міська\s+громада|сільська\s+громада|селищна\s+громада|громада|район|область|р-н)$/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -199,7 +203,7 @@ function canonicalOblast(value?: string): string {
 export function isUserInOfficialAlert(userOblast?: string, userLocationName?: string, alerts: RawAlert[] = []): boolean {
   const userOblastCanonical = canonicalOblast(userOblast);
   const userLocationCanonical = canonicalName(userLocationName);
-  const userIsKyivCity = canonicalName(userOblast) === 'київ';
+  const userIsKyivCity = canonicalName(userOblast) === 'київ' || userLocationCanonical === 'київ';
 
   return getActiveAirRaidAlerts(alerts).some(alert => {
     if (alert.location_type === 'oblast') {
@@ -208,9 +212,25 @@ export function isUserInOfficialAlert(userOblast?: string, userLocationName?: st
       return Boolean(userOblastCanonical) && canonicalOblast(alert.location_title) === userOblastCanonical;
     }
 
-    if (!userLocationCanonical || canonicalName(alert.location_title) !== userLocationCanonical) return false;
+    // Raion / Hromada / City alert matching
     const alertOblast = canonicalOblast(alert.location_oblast);
-    return !userOblastCanonical || !alertOblast || alertOblast === userOblastCanonical;
+    if (userOblastCanonical && alertOblast && alertOblast !== userOblastCanonical) {
+      return false;
+    }
+
+    if (!userLocationCanonical) return false;
+    const alertCanon = canonicalName(alert.location_title);
+
+    if (alertCanon === userLocationCanonical) return true;
+
+    // Stem match (e.g. 'бровари' vs 'броварський', 'бориспіль' vs 'бориспільський')
+    const userStem = userLocationCanonical.slice(0, Math.min(userLocationCanonical.length, 5));
+    const alertStem = alertCanon.slice(0, Math.min(alertCanon.length, 5));
+    if (userStem.length >= 4 && userStem === alertStem) {
+      return true;
+    }
+
+    return false;
   });
 }
 
