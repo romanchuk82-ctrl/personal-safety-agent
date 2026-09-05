@@ -2008,7 +2008,7 @@ export default function HomePage() {
                   ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
                   : 'bg-slate-900 text-slate-400 border-slate-700'
               )}>
-                {nativeProtectionActive || isActive ? 'СТАТУС: 🟢 Активний' : 'СТАТУС: ⚪ Пасивний'}
+                {isNativeIos && nativeProtectionActive ? 'СТАТУС: 🟢 Активний (Native CoreLocation)' : isActive ? 'СТАТУС: 🟡 Активний (Веб/PWA)' : 'СТАТУС: ⚪ Пасивний'}
               </span>
             </div>
 
@@ -2041,74 +2041,72 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* 6 MANDATORY INDICATORS: СТАТУС, GPS, ОНОВЛЕНО, ТОЧНІСТЬ, РУХ, СЕРВЕР, СПОВІЩЕННЯ */}
+            {/* TRUTH AUDIT INDICATORS: GPS, NATIVE APNs, WEB PUSH, TELEGRAM, РУХ, СЕРВЕР */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
-              {/* GPS: LIVE / STALE / OLD LOCATION */}
+              {/* 1. GPS STATUS */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
                 <span className="text-slate-400 text-[9px] font-mono">GPS СТАН:</span>
                 <span className={'font-bold mt-0.5 ' + (
-                  (nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300
-                    ? 'text-emerald-400'
-                    : (nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 900
-                    ? 'text-amber-400'
-                    : 'text-rose-400'
+                  isNativeIos 
+                    ? ((nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300 ? 'text-emerald-400' : 'text-amber-400')
+                    : 'text-amber-400'
                 )}>
-                  {(nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300
-                    ? 'GPS: 🟢 LIVE'
-                    : (nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 900
-                    ? 'GPS: 🟡 STALE'
-                    : 'GPS: 🔴 OLD LOCATION'}
+                  {isNativeIos 
+                    ? ((nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300 ? 'GPS: 🟢 LIVE (CoreLocation)' : 'GPS: 🟡 STALE')
+                    : 'GPS: 🟡 NATIVE APP NOT INSTALLED'}
                 </span>
                 <span className="text-[8px] text-slate-500">
-                  {(nativeLastServerSyncTs ? Math.floor((nowTick - nativeLastServerSyncTs)/1000) : 10) <= 300 ? '< 5 хв (свіжий)' : 'failsafe fallback'}
+                  {isNativeIos ? 'Native automotive tracking' : 'Web Geolocation fallback'}
                 </span>
               </div>
 
-              {/* ОНОВЛЕНО */}
+              {/* 2. NATIVE APNs */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">ОНОВЛЕНО:</span>
-                <span className="font-bold text-cyan-300 mt-0.5 font-mono">
-                  {nativeLastServerSyncTs
-                    ? `${Math.max(0, Math.floor((nowTick - nativeLastServerSyncTs)/1000))} с тому`
-                    : secondsSinceRealData > 0 ? `${secondsSinceRealData} с тому` : '10 с тому'}
+                <span className="text-slate-400 text-[9px] font-mono">NATIVE APNs:</span>
+                <span className="font-bold text-slate-400 mt-0.5 font-mono">
+                  ⚪ UNAVAILABLE
                 </span>
-                <span className="text-[8px] text-slate-500">CoreLocation sync</span>
+                <span className="text-[8px] text-slate-500">Free Tier / No APNs Entitlement</span>
               </div>
 
-              {/* ТОЧНІСТЬ */}
+              {/* 3. WEB PUSH */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">ТОЧНІСТЬ GPS:</span>
-                <span className="font-bold text-emerald-300 mt-0.5 font-mono">
-                  ±{nativeGpsAccuracy ?? Math.round(trustedLocation?.accuracyMeters ?? 10)} м
+                <span className="text-slate-400 text-[9px] font-mono">WEB PUSH:</span>
+                <span className={'font-bold mt-0.5 ' + (isWebPushSubscribed ? 'text-emerald-400' : 'text-slate-400')}>
+                  {isWebPushSubscribed ? '🟢 SUBSCRIBED' : '⚪ NOT SUBSCRIBED'}
                 </span>
-                <span className="text-[8px] text-slate-500">WGS-84 навігація</span>
+                <span className="text-[8px] text-slate-500">Safari Home Screen PWA</span>
               </div>
 
-              {/* РУХ: АВТО / АКТИВНИЙ / НЕРУХОМО */}
+              {/* 4. TELEGRAM FALLBACK */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">РУХ:</span>
+                <span className="text-slate-400 text-[9px] font-mono">TELEGRAM PUSH:</span>
+                <span className={'font-bold mt-0.5 ' + (telegramChatId.trim().length > 0 ? 'text-emerald-400' : 'text-slate-400')}>
+                  {telegramChatId.trim().length > 0 ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
+                </span>
+                <span className="text-[8px] text-slate-500 truncate">
+                  {telegramChatId.trim().length > 0 ? `Chat ID: ${telegramChatId}` : 'Введіть ID нижче'}
+                </span>
+              </div>
+
+              {/* 5. РУХ */}
+              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                <span className="text-slate-400 text-[9px] font-mono">РУХ (ДЕТЕКЦІЯ АВТО):</span>
                 <span className="font-bold text-amber-300 mt-0.5">
-                  {nativeMovementState === 'DRIVING' ? '🚗 Авто' : nativeMovementState === 'ACTIVE' ? '🚶 Активний' : '🏠 Нерухомо'}
+                  {isNativeIos 
+                    ? (nativeMovementState === 'DRIVING' ? '🚗 Авто' : nativeMovementState === 'ACTIVE' ? '🚶 Активний' : '🏠 Нерухомо')
+                    : '⚪ Web (Потребує Native IPA)'}
                 </span>
-                <span className="text-[8px] text-slate-500">адаптивний інтервал</span>
+                <span className="text-[8px] text-slate-500">CoreLocation speed filter</span>
               </div>
 
-              {/* СЕРВЕР ONLINE */}
+              {/* 6. СЕРВЕР 24/7 */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">СЕРВЕР:</span>
+                <span className="text-slate-400 text-[9px] font-mono">СЕРВЕР БЕЗПЕКИ:</span>
                 <span className="font-bold text-emerald-400 mt-0.5">
                   🟢 ONLINE
                 </span>
-                <span className="text-[8px] text-slate-500">24/7 автономний</span>
-              </div>
-
-              {/* СПОВІЩЕННЯ ACTIVE */}
-              <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">СПОВІЩЕННЯ:</span>
-                <span className="font-bold text-emerald-400 mt-0.5">
-                  🟢 ACTIVE
-                </span>
-                <span className="text-[8px] text-slate-500">Web Push + Telegram</span>
+                <span className="text-[8px] text-slate-500">24/7 автономний бекенд</span>
               </div>
             </div>
 
@@ -2125,7 +2123,7 @@ export default function HomePage() {
                 <span>APP SIGNING & АВТО-ОНОВЛЕННЯ</span>
               </span>
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700">
-                🟢 VALID (Залишилося {signingHealth.daysRemaining} днів)
+                🟡 PERSONAL TEAM — EXPIRES IN {signingHealth.daysRemaining} DAYS
               </span>
             </div>
 
@@ -2133,15 +2131,15 @@ export default function HomePage() {
             <div className="space-y-1.5 text-[10px] bg-black/60 p-2.5 rounded-xl border border-slate-800 font-mono">
               <div className="flex justify-between items-center">
                 <span className="text-slate-400">СТАН ПІДПИСУ:</span>
-                <span className="font-bold text-emerald-400">🟢 VALID (Залишилося {signingHealth.daysRemaining} днів)</span>
+                <span className="font-bold text-amber-400">🟡 PERSONAL TEAM — EXPIRES IN {signingHealth.daysRemaining} DAYS</span>
               </div>
               <div className="flex justify-between items-center border-t border-slate-800/80 pt-1">
                 <span className="text-slate-400">ОСТАННЄ ОНОВЛЕННЯ:</span>
-                <span className="font-bold text-cyan-300">Сьогодні (Personal Team $0/рік)</span>
+                <span className="font-bold text-amber-300">Потрібен Sideload (Sideloadly / AltStore)</span>
               </div>
               <div className="flex justify-between items-center border-t border-slate-800/80 pt-1">
                 <span className="text-slate-400">АВТО-ОНОВЛЕННЯ:</span>
-                <span className="font-bold text-emerald-300">{signingHealth.autoRefreshMechanism}</span>
+                <span className="font-bold text-amber-300">🟡 SideStore / AltServer Required (Кожні 7 днів)</span>
               </div>
             </div>
 
