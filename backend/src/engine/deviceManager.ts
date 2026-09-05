@@ -1,9 +1,63 @@
+import fs from 'fs';
+import path from 'path';
 import { DeviceSession, LocationPayload, LocationHealth, MovementState, WebPushSubscription, SigningHealth } from '../types.js';
 import { drivingLogger } from './drivingLogger.js';
 import { haversineDistanceKm } from './threatDistance.js';
 
 export class DeviceManager {
   private devices: Map<string, DeviceSession> = new Map();
+  private storageFile: string | null = null;
+
+  constructor(customStorageFile?: string) {
+    if (customStorageFile) {
+      this.storageFile = customStorageFile;
+      this.loadFromDisk();
+    } else if (process.env.NODE_ENV !== 'test') {
+      this.storageFile = path.resolve(process.cwd(), 'data', 'devices.json');
+      this.loadFromDisk();
+    }
+  }
+
+  private loadFromDisk(): void {
+    if (!this.storageFile) return;
+    try {
+      if (fs.existsSync(this.storageFile)) {
+        const raw = fs.readFileSync(this.storageFile, 'utf8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          for (const s of list) {
+            if (s && s.deviceId) {
+              this.devices.set(s.deviceId, s);
+            }
+          }
+          console.log(`[DeviceManager] Loaded ${this.devices.size} devices from disk.`);
+        }
+      }
+    } catch (e) {
+      console.warn('[DeviceManager] Failed to load devices from disk:', e);
+    }
+  }
+
+  private saveToDisk(): void {
+    if (!this.storageFile) return;
+    try {
+      const dir = path.dirname(this.storageFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = Array.from(this.devices.values());
+      fs.writeFileSync(this.storageFile, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('[DeviceManager] Failed to save devices to disk:', e);
+    }
+  }
+
+  /**
+   * Clears in-memory devices (useful for isolated tests)
+   */
+  public clear(): void {
+    this.devices.clear();
+  }
 
   /**
    * Registers or updates a device session.
@@ -21,6 +75,7 @@ export class DeviceManager {
       existing.isCriticalAlertsEnabled = isCriticalAlertsEnabled;
       existing.protectionActive = true;
       existing.updatedAt = now;
+      this.saveToDisk();
       return existing;
     }
 
@@ -38,19 +93,31 @@ export class DeviceManager {
     };
 
     this.devices.set(deviceId, newSession);
+    this.saveToDisk();
     return newSession;
   }
 
   /**
    * Register Web Push subscription for $0 free iPhone push alerts
    */
-  public registerWebPush(deviceId: string, subscription: WebPushSubscription): DeviceSession {
+  public registerWebPush(
+    deviceId: string,
+    subscription: WebPushSubscription,
+    location?: LocationPayload
+  ): DeviceSession {
     let session = this.devices.get(deviceId);
     if (!session) {
       session = this.registerDevice(deviceId);
     }
     session.webPushSubscription = subscription;
+    session.protectionActive = true;
+    if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
+      session.lastLocation = location;
+      session.lastReceivedTs = Date.now();
+      session.locationHealth = 'LIVE';
+    }
     session.updatedAt = Date.now();
+    this.saveToDisk();
     return session;
   }
 
@@ -64,6 +131,7 @@ export class DeviceManager {
     }
     session.telegramChatId = chatId;
     session.updatedAt = Date.now();
+    this.saveToDisk();
     return session;
   }
 
@@ -77,6 +145,7 @@ export class DeviceManager {
     }
     session.signingHealth = health;
     session.updatedAt = Date.now();
+    this.saveToDisk();
     return session;
   }
 
@@ -122,6 +191,7 @@ export class DeviceManager {
     // Log driving sample if driving or actively moving
     drivingLogger.logSample(payload, distanceMovedMeters);
 
+    this.saveToDisk();
     return session;
   }
 
@@ -174,6 +244,7 @@ export class DeviceManager {
     if (session) {
       session.protectionActive = active;
       session.updatedAt = Date.now();
+      this.saveToDisk();
     }
     return session;
   }

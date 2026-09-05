@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DeviceManager } from '../src/engine/deviceManager.js';
@@ -85,6 +86,7 @@ test('DeviceManager: location health transitions (LIVE -> STALE -> OLD_LOCATION)
 
 test('DeviceManager: Failsafe keeps protection active even when location becomes STALE', () => {
   const dm = new DeviceManager();
+  dm.clear();
   const deviceId = 'failsafe-user';
 
   // Point received 10 minutes ago (STALE)

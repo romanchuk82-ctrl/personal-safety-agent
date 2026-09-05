@@ -1,5 +1,5 @@
-// Personal Safety Agent Service Worker (Ajax-style voice notification support)
-const CACHE_NAME = 'psa-v3';
+// Personal Safety Agent Service Worker (iOS 16.4+ Web Push support)
+const CACHE_NAME = 'psa-v4';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -12,11 +12,9 @@ self.addEventListener('activate', (event) => {
 // Web Push event from server
 self.addEventListener('push', (event) => {
   let data = {
-    title: '🚨 УВАГА: Локальна небезпека!',
-    body: 'Пройдіть в укриття. Зафіксовано загрозу поблизу вашого району.',
-    icon: './icons/icon-192x192.png',
-    badge: './icons/icon-192x192.png',
-    tag: 'personal-safety-alert',
+    title: '🚨 TEST — PERSONAL SAFETY AGENT',
+    body: 'Увага! Тестове попередження про небезпеку.',
+    tag: 'test-threat-alert',
     data: {}
   };
 
@@ -33,19 +31,18 @@ self.addEventListener('push', (event) => {
     }
   }
 
+  const iconUrl = new URL('icons/icon-192x192.png', self.registration.scope).href;
+
   const options = {
     body: data.body,
-    icon: data.icon || './icons/icon-192x192.png',
-    badge: data.badge || './icons/icon-192x192.png',
-    tag: data.tag || 'personal-safety-alert',
+    icon: iconUrl,
+    badge: iconUrl,
+    tag: data.tag || 'test-threat-alert',
     sound: 'default',
-    vibrate: [400, 200, 400, 200, 400],
+    vibrate: [500, 200, 500, 200, 800],
     requireInteraction: true,
     renotify: true,
-    data: data.data || {},
-    actions: [
-      { action: 'open', title: '🛡️ Відкрити додаток' }
-    ]
+    data: data.data || {}
   };
 
   event.waitUntil(

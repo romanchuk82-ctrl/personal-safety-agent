@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { deviceManager } from './engine/deviceManager.js';
@@ -15,6 +15,14 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Handle malformed JSON body errors safely without crashing the server
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Malformed JSON payload', details: (err as any).message });
+  }
+  next(err);
+});
 
 // Start the 24/7 background safety engine
 safetyMonitor.start();
@@ -59,17 +67,23 @@ app.post('/api/device/register', (req: Request, res: Response) => {
  * Register Web Push subscription ($0 free iPhone push alerts)
  */
 app.post('/api/device/subscribe-push', (req: Request, res: Response) => {
-  const { deviceId, subscription } = req.body as { deviceId: string; subscription: WebPushSubscription };
+  const { deviceId, subscription, location } = req.body as {
+    deviceId: string;
+    subscription: WebPushSubscription;
+    location?: LocationPayload;
+  };
 
   if (!deviceId || !subscription || !subscription.endpoint) {
     return res.status(400).json({ error: 'deviceId and valid subscription are required' });
   }
 
-  const session = deviceManager.registerWebPush(deviceId, subscription);
+  const session = deviceManager.registerWebPush(deviceId, subscription, location);
   res.json({
     success: true,
     message: 'Web Push subscription registered successfully',
-    hasWebPush: !!session.webPushSubscription
+    hasWebPush: !!session.webPushSubscription,
+    locationHealth: session.locationHealth,
+    hasLocation: !!session.lastLocation
   });
 });
 
@@ -209,6 +223,65 @@ app.get('/api/device/driving-diagnostics', (_req: Request, res: Response) => {
 });
 
 /**
+ * Trigger Delayed Real Web Push Alert for Locked iPhone physical verification
+ */
+app.post('/api/alerts/test-push', async (req: Request, res: Response) => {
+  const { deviceId, delaySec } = req.body as { deviceId: string; delaySec?: number };
+  if (!deviceId) {
+    return res.status(400).json({ error: 'deviceId is required' });
+  }
+
+  const session = deviceManager.getDevice(deviceId);
+  if (!session) {
+    return res.status(404).json({ error: 'Device session not found. Please activate Web Push first.' });
+  }
+
+  if (!session.webPushSubscription) {
+    return res.status(400).json({ error: 'Web Push subscription not found on server for this device.' });
+  }
+
+  const delaySeconds = Math.max(0, Math.min(60, Number(delaySec) || 15));
+  const delayMs = delaySeconds * 1000;
+
+  console.log(`[Server] Scheduling TEST Web Push for ${deviceId} in ${delaySeconds}s (lock screen test)...`);
+
+  setTimeout(async () => {
+    try {
+      console.log(`[Server] Dispatching TEST Web Push to ${deviceId}...`);
+      const assessment: AlertAssessment = {
+        threatId: `test-lock-${Date.now()}`,
+        category: 'UAV_STRIKE',
+        distanceKm: 5.0,
+        directionCompass: 'Пн-Сх',
+        relevance: 'CRITICAL',
+        alertRequired: true,
+        alertTitle: '🚨 TEST — PERSONAL SAFETY AGENT',
+        alertBody: 'Увага! Тестове попередження про небезпеку.',
+        timestamp: Date.now()
+      };
+
+      const result = await alertDeliveryService.deliverAlert(session, assessment, {
+        isTest: true,
+        force: true
+      });
+      console.log(`[Server] Test alert delivery complete: webPush=${result.webPushSuccess}, telegram=${result.telegramSuccess}`);
+    } catch (e: any) {
+      console.error('[Server] Delayed Web Push error:', e?.message || e);
+    }
+  }, delayMs);
+
+  res.json({
+    success: true,
+    scheduled: true,
+    delaySec: delaySeconds,
+    message: 'Тест надіслано. Заблокуйте iPhone.',
+    deviceId: session.deviceId,
+    hasWebPush: !!session.webPushSubscription,
+    hasTelegram: !!session.telegramChatId
+  });
+});
+
+/**
  * Trigger Real End-to-End Test Alert ($0 Free Channels: Web Push + Telegram)
  */
 app.post('/api/alerts/test-channel', async (req: Request, res: Response) => {
@@ -338,6 +411,12 @@ app.post('/api/alerts/simulate', async (req: Request, res: Response) => {
     message: `Simulated threat created at ~${dist} km from user location`,
     threat
   });
+});
+
+// Fallback error handler
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[Personal Safety Engine] Unhandled error:', err);
+  res.status(500).json({ error: 'Internal Server Error', details: err?.message });
 });
 
 // Start listening if not imported as module

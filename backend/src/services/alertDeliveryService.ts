@@ -1,8 +1,8 @@
 import webpush from 'web-push';
 import { DeviceSession, AlertAssessment, AlertDeliveryResult, WebPushSubscription } from '../types.js';
 
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCR9hC4I8CGfY2X5RZmR_CC8-0zi8ITFHDSzhVO4CXiVoZ-1CFrFU7m-ev6EW_FmURjacesDcojC47H6BtZSEII';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '-iJ4fJhTLRfiJ_YfkSmBzeXpPqJEP97e67Mi4lue2dY';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:security@personal-safety.app';
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
@@ -31,13 +31,13 @@ export class AlertDeliveryService {
         notification: {
           title,
           body,
-          icon: '/icons/icon-192x192.png',
-          badge: '/icons/icon-192x192.png',
+          icon: '/personal-safety-agent/icons/icon-192x192.png',
+          badge: '/personal-safety-agent/icons/icon-192x192.png',
           vibrate: [500, 200, 500, 200, 800],
           requireInteraction: true,
           tag: data.isTest ? 'test-threat-alert' : 'tactical-threat-alert',
           data: {
-            url: '/',
+            url: '/personal-safety-agent/',
             timestamp: Date.now(),
             ...data
           }
@@ -122,9 +122,16 @@ export class AlertDeliveryService {
     let webPushSuccess = false;
     let telegramSuccess = false;
 
-    const prefix = options.isTest ? '⚠️ [TEST] ' : '🚨 ';
-    const title = `${prefix}${assessment.alertTitle}`;
-    const body = `${assessment.alertBody} Дистанція: ~${assessment.distanceKm.toFixed(1)} км (${assessment.directionCompass}).`;
+    let title = assessment.alertTitle;
+    if (!title.startsWith('🚨') && !title.startsWith('⚠️')) {
+      const prefix = options.isTest ? '⚠️ [TEST] ' : '🚨 ';
+      title = `${prefix}${assessment.alertTitle}`;
+    }
+
+    const isTest = options.isTest || title.includes('TEST');
+    const body = isTest && assessment.alertBody.includes('Тестове попередження')
+      ? assessment.alertBody
+      : `${assessment.alertBody} Дистанція: ~${assessment.distanceKm.toFixed(1)} км (${assessment.directionCompass}).`;
 
     // 1. Web Push Channel
     if (session.webPushSubscription) {
