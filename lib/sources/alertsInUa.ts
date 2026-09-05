@@ -1,7 +1,9 @@
+export type AlertLocationType = 'oblast' | 'raion' | 'hromada' | 'city' | 'unknown';
+
 export interface RawAlert {
   id: number;
   location_title: string;
-  location_type: 'oblast' | 'raion' | 'hromada' | 'city';
+  location_type: AlertLocationType;
   started_at: string;
   finished_at: string | null;
   updated_at: string;
@@ -9,21 +11,14 @@ export interface RawAlert {
   location_oblast: string;
   location_raion?: string;
   location_uid: string;
+  location_oblast_uid?: string;
   notes?: string | null;
+  calculated?: boolean;
 }
-
-interface CacheEntry {
-  data: RawAlert[];
-  timestamp: number;
-  sourceUpdatedIso: string;
-}
-
-let alertsCache: CacheEntry | null = null;
-const CACHE_TTL_MS = 5000; // 5 seconds cache for real-time responsiveness
 
 export interface AlertsDiagnostic {
   sourceOnline: boolean;
-  status: 'OK' | 'CACHE' | 'ERROR';
+  status: 'OK' | 'ERROR';
   activeAlertsCount: number;
   sourceUpdatedIso: string;
   receivedByAgentIso: string;
@@ -34,6 +29,8 @@ export interface AlertsDiagnostic {
   errorDetails?: string;
   usedProxy?: string;
 }
+
+export interface FetchActiveAlertsOptions { force?: boolean; }
 
 export let lastAlertsFetchDiagnostic: AlertsDiagnostic = {
   sourceOnline: false,
@@ -46,206 +43,149 @@ export let lastAlertsFetchDiagnostic: AlertsDiagnostic = {
   lastFetchTime: ''
 };
 
-export async function fetchActiveAlerts(token?: string): Promise<{
+type FetchResult = {
   alerts: RawAlert[];
-  status: 'OK' | 'CACHE' | 'ERROR';
-  diagnostic?: AlertsDiagnostic;
+  status: 'OK' | 'ERROR';
+  diagnostic: AlertsDiagnostic;
   message?: string;
-}> {
-  const apiToken = token || process.env.ALERTS_API_TOKEN || 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
-  const now = Date.now();
-  const isBrowser = typeof window !== 'undefined';
+};
 
-  if (alertsCache && (now - alertsCache.timestamp) < CACHE_TTL_MS) {
-    const dataAgeSec = alertsCache.sourceUpdatedIso
-      ? Math.max(0, Math.floor((now - new Date(alertsCache.sourceUpdatedIso).getTime()) / 1000))
-      : Math.max(0, Math.floor((now - alertsCache.timestamp) / 1000));
+let inFlightFetch: Promise<FetchResult> | null = null;
 
-    lastAlertsFetchDiagnostic = {
-      sourceOnline: true,
-      status: 'CACHE',
-      activeAlertsCount: (alertsCache.data || []).filter(a => !a.finished_at).length,
-      sourceUpdatedIso: alertsCache.sourceUpdatedIso,
-      receivedByAgentIso: new Date(alertsCache.timestamp).toISOString(),
-      dataAgeSec,
-      isStale: dataAgeSec > 60,
-      lastFetchTime: new Date(alertsCache.timestamp).toISOString()
-    };
-    return { alerts: [...alertsCache.data], status: 'CACHE', diagnostic: lastAlertsFetchDiagnostic };
+export function getActiveAirRaidAlerts(alerts: RawAlert[] = []): RawAlert[] {
+  return alerts.filter(alert => !alert.finished_at && alert.alert_type === 'air_raid');
+}
+
+function parsePayload(payload: any): { alerts: RawAlert[]; sourceUpdatedIso?: string } {
+  const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
+  if (!parsed || !Array.isArray(parsed.alerts)) throw new Error('Invalid official alerts payload');
+  const sourceDate = parsed.meta?.last_updated_at ? new Date(parsed.meta.last_updated_at) : null;
+  return {
+    alerts: parsed.alerts,
+    sourceUpdatedIso: sourceDate && !Number.isNaN(sourceDate.getTime()) ? sourceDate.toISOString() : undefined
+  };
+}
+
+async function performFetch(token: string, options: FetchActiveAlertsOptions): Promise<FetchResult> {
+  const requestedAt = Date.now();
+  const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${token}`;
+  const endpoints: { name: string; url: string; headers?: Record<string, string>; isJina?: boolean }[] = [];
+
+  if (typeof window === 'undefined') {
+    endpoints.push({ name: 'direct', url: directUrl, headers: { Accept: 'application/json' } });
   }
-
-  const directUrl = `https://api.alerts.in.ua/v1/alerts/active.json?token=${apiToken}`;
-
-  // In node/server direct fetch works natively. In browser, CORS proxies are required.
-  const candidateEndpoints: { name: string; url: string; headers?: Record<string, string>; isJina?: boolean }[] = [];
-
-  if (!isBrowser) {
-    candidateEndpoints.push({ name: 'direct', url: directUrl, headers: { 'Accept': 'application/json' } });
-  }
-
-  // Jina proxy: fast, reliable CORS-enabled endpoint
-  candidateEndpoints.push({
+  endpoints.push({
     name: 'jina',
     url: `https://r.jina.ai/${directUrl}`,
-    headers: { 'Accept': 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'X-Cache-Tolerance': options.force ? '0' : '5',
+      ...(options.force ? { 'X-No-Cache': 'true' } : {})
+    },
     isJina: true
   });
+  endpoints.push({ name: 'allorigins', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}` });
 
-  // Fallback direct in case browser allows or proxy failed
-  candidateEndpoints.push({
-    name: 'direct-fallback',
-    url: directUrl,
-    headers: { 'Accept': 'application/json' }
-  });
-
-  // Secondary proxy fallback
-  candidateEndpoints.push({
-    name: 'allorigins',
-    url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`
-  });
-
-  for (const endpoint of candidateEndpoints) {
+  const failures: string[] = [];
+  for (const endpoint of endpoints) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6500);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-
-      const res = await fetch(endpoint.url, {
+      const response = await fetch(endpoint.url, {
         headers: endpoint.headers,
-        signal: controller.signal
+        signal: controller.signal,
+        cache: 'no-store'
       });
-
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const json = await response.json();
+      const { alerts, sourceUpdatedIso = new Date().toISOString() } = parsePayload(endpoint.isJina ? json?.data?.content : json);
+      const receivedAt = Date.now();
+      // `meta.last_updated_at` is the time of the last alert-state mutation, not
+      // the age of this HTTP response. A successful no-store/bypassed fetch is a
+      // current snapshot even when no zone has changed for several minutes.
+      const dataAgeSec = 0;
+      const diagnostic: AlertsDiagnostic = {
+        sourceOnline: true,
+        status: 'OK',
+        activeAlertsCount: getActiveAirRaidAlerts(alerts).length,
+        sourceUpdatedIso,
+        receivedByAgentIso: new Date(receivedAt).toISOString(),
+        dataAgeSec,
+        isStale: false,
+        lastFetchTime: new Date(receivedAt).toISOString(),
+        usedProxy: endpoint.name
+      };
+      lastAlertsFetchDiagnostic = diagnostic;
+      return { alerts, status: 'OK', diagnostic };
+    } catch (error) {
+      failures.push(`${endpoint.name}: ${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
       clearTimeout(timeout);
-
-      if (res.ok) {
-        let alerts: RawAlert[] = [];
-        let sourceUpdatedIso = new Date(now).toISOString();
-
-        if (endpoint.isJina) {
-          const jinaJson = await res.json();
-          const rawContent = jinaJson?.data?.content;
-          if (rawContent) {
-            const parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;
-            alerts = parsed.alerts || [];
-            if (parsed.meta?.last_updated_at) {
-              const dt = new Date(parsed.meta.last_updated_at);
-              if (!isNaN(dt.getTime())) {
-                sourceUpdatedIso = dt.toISOString();
-              }
-            }
-          }
-        } else {
-          const data = await res.json();
-          alerts = data.alerts || [];
-          if (data.meta?.last_updated_at) {
-            const dt = new Date(data.meta.last_updated_at);
-            if (!isNaN(dt.getTime())) {
-              sourceUpdatedIso = dt.toISOString();
-            }
-          }
-        }
-
-        if (Array.isArray(alerts)) {
-          alertsCache = {
-            data: alerts,
-            timestamp: now,
-            sourceUpdatedIso
-          };
-
-          const dataAgeSec = Math.max(0, Math.floor((now - new Date(sourceUpdatedIso).getTime()) / 1000));
-
-          lastAlertsFetchDiagnostic = {
-            sourceOnline: true,
-            status: 'OK',
-            activeAlertsCount: alerts.filter(a => !a.finished_at).length,
-            sourceUpdatedIso,
-            receivedByAgentIso: new Date(now).toISOString(),
-            dataAgeSec,
-            isStale: dataAgeSec > 60,
-            lastFetchTime: new Date(now).toISOString(),
-            usedProxy: endpoint.name
-          };
-
-          return { alerts: [...alerts], status: 'OK', diagnostic: lastAlertsFetchDiagnostic };
-        }
-      }
-    } catch (err: any) {
-      // Continue to next proxy
     }
   }
 
-  if (alertsCache) {
-    const dataAgeSec = alertsCache.sourceUpdatedIso
-      ? Math.max(0, Math.floor((now - new Date(alertsCache.sourceUpdatedIso).getTime()) / 1000))
-      : Math.max(0, Math.floor((now - alertsCache.timestamp) / 1000));
-
-    lastAlertsFetchDiagnostic = {
-      sourceOnline: true,
-      status: 'CACHE',
-      activeAlertsCount: (alertsCache.data || []).filter(a => !a.finished_at).length,
-      sourceUpdatedIso: alertsCache.sourceUpdatedIso,
-      receivedByAgentIso: new Date(alertsCache.timestamp).toISOString(),
-      dataAgeSec,
-      isStale: dataAgeSec > 60,
-      lastFetchTime: new Date(alertsCache.timestamp).toISOString(),
-      errorDetails: 'Fallback to cached alerts'
-    };
-    return { alerts: [...alertsCache.data], status: 'CACHE', diagnostic: lastAlertsFetchDiagnostic, message: 'Fallback to cache' };
-  }
-
-  lastAlertsFetchDiagnostic = {
+  const diagnostic: AlertsDiagnostic = {
     sourceOnline: false,
     status: 'ERROR',
     activeAlertsCount: 0,
     sourceUpdatedIso: '',
-    receivedByAgentIso: '',
-    dataAgeSec: 999,
+    receivedByAgentIso: new Date(requestedAt).toISOString(),
+    dataAgeSec: 0,
     isStale: true,
-    lastFetchTime: new Date(now).toISOString(),
-    errorDetails: 'Could not fetch active alerts via candidate endpoints'
+    lastFetchTime: new Date().toISOString(),
+    errorDetails: failures.join('; ')
   };
-
-  return { alerts: [], status: 'ERROR', diagnostic: lastAlertsFetchDiagnostic, message: 'Could not fetch active alerts' };
+  lastAlertsFetchDiagnostic = diagnostic;
+  return {
+    alerts: [],
+    status: 'ERROR',
+    diagnostic,
+    message: 'Official alerts source is unavailable; stale polygons were cleared.'
+  };
 }
 
-/**
- * Checks if the user's specific location or oblast is currently under an active official air raid alert.
- */
-export function isUserInOfficialAlert(
-  userOblast?: string,
-  userLocationName?: string,
-  alerts: RawAlert[] = []
-): boolean {
-  if (!alerts || alerts.length === 0) return false;
-  const activeAlerts = alerts.filter(a => !a.finished_at);
-  if (activeAlerts.length === 0) return false;
+export async function fetchActiveAlerts(token?: string, options: FetchActiveAlertsOptions = {}): Promise<FetchResult> {
+  const apiToken = token || process.env.ALERTS_API_TOKEN || 'f2184a0fd1d14c5aa291368854cbe654d178883fab2203';
+  // Overlapping timers share only the active network request. Completed results are
+  // never cached, so manual refresh always reaches the official source.
+  if (inFlightFetch) {
+    if (!options.force) return inFlightFetch;
+    await inFlightFetch;
+  }
+  inFlightFetch = performFetch(apiToken, options).finally(() => { inFlightFetch = null; });
+  return inFlightFetch;
+}
 
-  const ob = (userOblast || '').toLowerCase().trim();
-  const loc = (userLocationName || '').toLowerCase().trim();
+function canonicalName(value?: string): string {
+  return (value || '').toLocaleLowerCase('uk-UA')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/^м\.\s*/u, '')
+    .replace(/^місто\s+/u, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  // Extract stem for oblast matching (e.g. 'київ' from 'Київська область')
-  const oblastStem = ob.replace(/(ська|цька|зька|а|\s+область)$/i, '').trim();
+function canonicalOblast(value?: string): string {
+  return canonicalName(value).replace(/\s+область$/u, '').trim();
+}
 
-  return activeAlerts.some(a => {
-    const title = (a.location_title || '').toLowerCase().trim();
-    const alertOblast = (a.location_oblast || '').toLowerCase().trim();
+/** Local alerts are deliberately never promoted to their whole oblast. */
+export function isUserInOfficialAlert(userOblast?: string, userLocationName?: string, alerts: RawAlert[] = []): boolean {
+  const userOblastCanonical = canonicalOblast(userOblast);
+  const userLocationCanonical = canonicalName(userLocationName);
+  const userIsKyivCity = canonicalName(userOblast) === 'київ';
 
-    // Direct match with user's oblast
-    if (ob && (title === ob || alertOblast === ob)) return true;
-    if (oblastStem && oblastStem.length >= 4) {
-      if (title.includes(oblastStem) || alertOblast.includes(oblastStem)) return true;
+  return getActiveAirRaidAlerts(alerts).some(alert => {
+    if (alert.location_type === 'oblast') {
+      const alertIsKyivCity = alert.location_title.trim().startsWith('м.') && canonicalName(alert.location_title) === 'київ';
+      if (alertIsKyivCity !== userIsKyivCity && (alertIsKyivCity || userIsKyivCity)) return false;
+      return Boolean(userOblastCanonical) && canonicalOblast(alert.location_title) === userOblastCanonical;
     }
 
-    // Direct match with user's city/town (e.g. "м. Київ", "Крюківщина", "Васильків")
-    if (loc && loc.length >= 4) {
-      if (title.includes(loc) || alertOblast.includes(loc)) return true;
-    }
-
-    // Kyiv special case: user in Kyiv or Kyivska oblast
-    if ((ob.includes('київ') || loc.includes('київ')) && (title.includes('київ') || alertOblast.includes('київ'))) {
-      return true;
-    }
-
-    return false;
+    if (!userLocationCanonical || canonicalName(alert.location_title) !== userLocationCanonical) return false;
+    const alertOblast = canonicalOblast(alert.location_oblast);
+    return !userOblastCanonical || !alertOblast || alertOblast === userOblastCanonical;
   });
 }
 
+export function __resetAlertsFetchStateForTests(): void { inFlightFetch = null; }

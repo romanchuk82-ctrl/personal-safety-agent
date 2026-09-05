@@ -2,8 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyThreat, getThreatTtlMinutes } from '../lib/threatClassifier';
 import { evaluateLocalSecurity } from '../lib/matcher';
-import { isUserInOfficialAlert, RawAlert } from '../lib/sources/alertsInUa';
+import { isUserInOfficialAlert, RawAlert, getActiveAirRaidAlerts } from '../lib/sources/alertsInUa';
 import { UKRAINE_REGIONS_GEOJSON } from '../lib/ukraineRegions';
+import { getOfficialGeometryDescriptor, officialLocationTypeLabel } from '../lib/officialAlertGeometry';
 
 describe('ЗАДАЧА 1 — Життєвий цикл та TTL рухомих цілей', () => {
   it('Диференційовані operational TTL: короткі для рухомих цілей (5-8 хв)', () => {
@@ -234,5 +235,68 @@ describe('ЗАДАЧА 2 — Шар офіційних тривог та badge',
     assert.ok(names.includes('Дніпропетровська область'));
     assert.ok(names.includes('Одеська область'));
     assert.ok(names.includes('Львівська область'));
+  });
+
+  it('локальна тривога району не піднімається до рівня всієї області', () => {
+    const raion: RawAlert = {
+      id: 201,
+      location_title: 'Бориспільський район',
+      location_type: 'raion',
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      updated_at: new Date().toISOString(),
+      alert_type: 'air_raid',
+      location_oblast: 'Київська область',
+      location_uid: '78'
+    };
+    assert.equal(isUserInOfficialAlert('Київська область', 'Бровари', [raion]), false);
+    assert.equal(isUserInOfficialAlert('Київська область', 'Бориспільський район', [raion]), true);
+  });
+
+  it('м. Київ не ототожнюється з Київською областю', () => {
+    const kyivCity: RawAlert = {
+      id: 202,
+      location_title: 'м. Київ',
+      location_type: 'oblast',
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      updated_at: new Date().toISOString(),
+      alert_type: 'air_raid',
+      location_oblast: 'м. Київ',
+      location_uid: '31'
+    };
+    assert.equal(isUserInOfficialAlert('м. Київ', 'Київ', [kyivCity]), true);
+    assert.equal(isUserInOfficialAlert('Київська область', 'Бровари', [kyivCity]), false);
+  });
+
+  it('air-raid фільтр виключає артобстріл і одразу прибирає завершену зону', () => {
+    const base: RawAlert = {
+      id: 203,
+      location_title: 'Нікопольська територіальна громада',
+      location_type: 'hromada',
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      updated_at: new Date().toISOString(),
+      alert_type: 'air_raid',
+      location_oblast: 'Дніпропетровська область',
+      location_uid: '351'
+    };
+    const artillery = { ...base, id: 204, alert_type: 'artillery_shelling' };
+    const finished = { ...base, id: 205, finished_at: new Date().toISOString() };
+    assert.deepEqual(getActiveAirRaidAlerts([base, artillery, finished]).map(item => item.id), [203]);
+  });
+
+  it('детерміновано зіставляє official UID з geometry для області, району, громади й міста', () => {
+    const make = (type: RawAlert['location_type'], uid: string, title: string): RawAlert => ({
+      id: Number(uid), location_title: title, location_type: type,
+      started_at: new Date().toISOString(), finished_at: null, updated_at: new Date().toISOString(),
+      alert_type: 'air_raid', location_oblast: 'Тестова область', location_uid: uid
+    });
+    assert.deepEqual(getOfficialGeometryDescriptor(make('oblast', '16', 'Луганська область'))?.geometryKey, 'oblast:16');
+    assert.deepEqual(getOfficialGeometryDescriptor(make('raion', '78', 'Бориспільський район'))?.geometryKey, 'raion:78');
+    assert.deepEqual(getOfficialGeometryDescriptor(make('hromada', '351', 'Нікопольська громада'))?.geometryKey, 'hromada:351');
+    assert.deepEqual(getOfficialGeometryDescriptor(make('city', '5351', 'м. Нікополь'))?.geometryKey, 'hromada:351');
+    assert.equal(getOfficialGeometryDescriptor(make('unknown', '9', 'Невідомо')), null);
+    assert.equal(officialLocationTypeLabel('hromada'), 'громада');
   });
 });

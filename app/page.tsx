@@ -52,7 +52,12 @@ import {
   AlertCircle,
   Loader2
 } from 'lucide-react';
-import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic } from '@/lib/sources/alertsInUa';
+import { fetchActiveAlerts, RawAlert, isUserInOfficialAlert, lastAlertsFetchDiagnostic, getActiveAirRaidAlerts } from '@/lib/sources/alertsInUa';
+import {
+  EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC,
+  OfficialAlertGeometryDiagnostic,
+  officialLocationTypeLabel
+} from '@/lib/officialAlertGeometry';
 import { fetchAllTelegramFeeds, MONITORED_CHANNELS, USER_PRIORITY_CHANNELS, ChannelConfig, ChannelIngestStatus, TelegramIngestMetrics } from '@/lib/sources/telegramScraper';
 import { evaluateLocalSecurity, SecurityEvaluationResult, ThreatEvent, SecurityState, RejectedMessageItem } from '@/lib/matcher';
 import { findNearestLocation, UKRAINIAN_GAZETTEER, GeoLocation } from '@/lib/gazetteer';
@@ -69,12 +74,12 @@ import {
 
 const CITY_PRESETS = [
   // Київ та Столичний регіон
-  { name: 'Київ (Центр / Хрещатик)', lat: 50.4501, lng: 30.5234, oblast: 'Київська область' },
-  { name: 'Київ (Оболонь / Поділ)', lat: 50.5015, lng: 30.4981, oblast: 'Київська область' },
-  { name: 'Київ (Позняки / Дарниця)', lat: 50.3980, lng: 30.6340, oblast: 'Київська область' },
-  { name: 'Київ (Троєщина / Деснянський)', lat: 50.5100, lng: 30.5900, oblast: 'Київська область' },
-  { name: 'Київ (Святошин / Борщагівка)', lat: 50.4580, lng: 30.3720, oblast: 'Київська область' },
-  { name: 'Київ (Голосіїв / Теремки)', lat: 50.3800, lng: 30.4900, oblast: 'Київська область' },
+  { name: 'Київ (Центр / Хрещатик)', lat: 50.4501, lng: 30.5234, oblast: 'м. Київ' },
+  { name: 'Київ (Оболонь / Поділ)', lat: 50.5015, lng: 30.4981, oblast: 'м. Київ' },
+  { name: 'Київ (Позняки / Дарниця)', lat: 50.3980, lng: 30.6340, oblast: 'м. Київ' },
+  { name: 'Київ (Троєщина / Деснянський)', lat: 50.5100, lng: 30.5900, oblast: 'м. Київ' },
+  { name: 'Київ (Святошин / Борщагівка)', lat: 50.4580, lng: 30.3720, oblast: 'м. Київ' },
+  { name: 'Київ (Голосіїв / Теремки)', lat: 50.3800, lng: 30.4900, oblast: 'м. Київ' },
   { name: 'Бориспіль (Центр / Аеропорт)', lat: 50.3500, lng: 30.9500, oblast: 'Київська область' },
   { name: 'Бровари (Центр)', lat: 50.5114, lng: 30.7903, oblast: 'Київська область' },
   { name: 'Ірпінь / Буча', lat: 50.5200, lng: 30.2400, oblast: 'Київська область' },
@@ -108,6 +113,8 @@ export default function HomePage() {
   const [evaluation, setEvaluation] = useState<SecurityEvaluationResult | null>(null);
   const [officialAlerts, setOfficialAlerts] = useState<RawAlert[]>([]);
   const [alertsDiagnostic, setAlertsDiagnostic] = useState(lastAlertsFetchDiagnostic);
+  const [officialGeometryDiagnostic, setOfficialGeometryDiagnostic] = useState<OfficialAlertGeometryDiagnostic>(EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC);
+  const [isRefreshingOfficial, setIsRefreshingOfficial] = useState(false);
   const [mapUpdatedIso, setMapUpdatedIso] = useState<string | null>(null);
   const [sourcesHealth, setSourcesHealth] = useState<any>(null);
   const [sourceStatuses, setSourceStatuses] = useState<Record<string, ChannelIngestStatus>>({});
@@ -121,8 +128,8 @@ export default function HomePage() {
       try {
         const res = await fetchActiveAlerts();
         if (isMounted) {
-          if (res.alerts) setOfficialAlerts(res.alerts);
-          setAlertsDiagnostic({ ...lastAlertsFetchDiagnostic });
+          setOfficialAlerts(res.status === 'OK' && !res.diagnostic.isStale ? res.alerts : []);
+          setAlertsDiagnostic({ ...res.diagnostic });
         }
       } catch (err) {
         console.error('Failed to load official alerts:', err);
@@ -137,6 +144,24 @@ export default function HomePage() {
       clearInterval(interval);
     };
   }, []);
+
+  const handleOfficialAlertsRefresh = useCallback(async () => {
+    if (isRefreshingOfficial) return;
+    setIsRefreshingOfficial(true);
+    try {
+      const res = await fetchActiveAlerts(undefined, { force: true });
+      setOfficialAlerts(res.status === 'OK' && !res.diagnostic.isStale ? res.alerts : []);
+      setAlertsDiagnostic({ ...res.diagnostic });
+    } finally {
+      setIsRefreshingOfficial(false);
+    }
+  }, [isRefreshingOfficial]);
+
+  const handleOfficialGeometryDiagnostic = useCallback((diagnostic: OfficialAlertGeometryDiagnostic) => {
+    setOfficialGeometryDiagnostic(diagnostic);
+  }, []);
+
+  const handleMapUpdated = useCallback((iso: string) => setMapUpdatedIso(iso), []);
   
   // Location Manager & Search Modals
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
@@ -367,8 +392,8 @@ export default function HomePage() {
       }
 
       setEvaluation(result);
-      setOfficialAlerts(alertsRes.alerts || []);
-      setAlertsDiagnostic({ ...lastAlertsFetchDiagnostic });
+      setOfficialAlerts(alertsRes.status === 'OK' && !alertsRes.diagnostic.isStale ? alertsRes.alerts : []);
+      setAlertsDiagnostic({ ...alertsRes.diagnostic });
       setLastCheckTime(new Date());
       setSecondsSinceCheck(0);
 
@@ -774,7 +799,11 @@ export default function HomePage() {
   const activeEventsCount = (evaluation?.threatEvents || []).filter(
     (t) => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID'
   ).length;
-  const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
+  const activeOfficialAlerts = getActiveAirRaidAlerts(officialAlerts);
+  const activeOfficialAlertsCount = activeOfficialAlerts.length;
+  const officialSnapshotAgeSec = alertsDiagnostic.receivedByAgentIso
+    ? Math.max(0, Math.floor((Date.now() - new Date(alertsDiagnostic.receivedByAgentIso).getTime()) / 1000))
+    : 0;
   const historyThreats = (evaluation?.historyEvents || []).filter(
     (t) => (t.status === 'stale' || t.status === 'cleared') && t.category !== 'GENERAL_AIR_RAID'
   );
@@ -957,7 +986,7 @@ export default function HomePage() {
                     ? `⚠️ ${evaluation.monitoringHealthReasonUk}${evaluation.monitoringHealthDetailsUk ? ' • ' + evaluation.monitoringHealthDetailsUk : ''}`
                     : '⚠️ Дані застаріли або відсутній зв’язок із джерелами.')
                 : isUnderOfficialAlert
-                ? `В області оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
+                ? `Для вашої території оголошено офіційну повітряну тривогу. Безпосередніх рухомих цілей у вашому секторі (${radiusKm.toFixed(0)} км) наразі не виявлено.`
                 : evaluation?.stateDescriptionUk || `Локальних загроз поблизу не виявлено. ${monitoredSourcesCount} радарних джерел сканують ваш сектор у реальному часі.`}
             </p>
 
@@ -1117,7 +1146,8 @@ export default function HomePage() {
                 isFullScreen={true}
                 activeTab={activeTab}
                 centerTrigger={mapCenterTrigger}
-                onMapUpdated={(iso) => setMapUpdatedIso(iso)}
+                onMapUpdated={handleMapUpdated}
+                onOfficialGeometryDiagnostic={handleOfficialGeometryDiagnostic}
               />
             </div>
           ) : (
@@ -1474,10 +1504,22 @@ export default function HomePage() {
               </span>
             </div>
 
+            <button
+              type="button"
+              onClick={handleOfficialAlertsRefresh}
+              disabled={isRefreshingOfficial}
+              className="w-full py-2 px-3 rounded-xl border border-rose-800 bg-rose-950/70 hover:bg-rose-900/70 disabled:opacity-60 text-rose-100 text-[10px] font-bold flex items-center justify-center gap-2"
+            >
+              <RefreshCw className={'w-3.5 h-3.5 ' + (isRefreshingOfficial ? 'animate-spin' : '')} />
+              {isRefreshingOfficial ? 'Отримання свіжого стану…' : 'Оновити official alerts зараз'}
+            </button>
+
             {alertsDiagnostic.isStale && (
               <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-700 text-amber-300 text-[10px] flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                <span>⚠️ Увага: Дані офіційних тривог оновлювалися понад 60с тому ({alertsDiagnostic.dataAgeSec}с). Перевірте зв'язок.</span>
+                <span>{alertsDiagnostic.sourceOnline
+                  ? `⚠️ Дані official source старші за 60с (${alertsDiagnostic.dataAgeSec}с). Полігони приховано.`
+                  : '⚠️ Official source недоступний. Попередні полігони очищено й не подано як актуальні.'}</span>
               </div>
             )}
 
@@ -1491,9 +1533,9 @@ export default function HomePage() {
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">АКТИВНИХ ОБЛАСТЕЙ:</span>
+                <span className="text-slate-400 block font-mono">ACTIVE OFFICIAL ZONES:</span>
                 <span className="font-mono font-bold text-rose-300 mt-0.5 block">
-                  {activeOfficialAlertsCount} областей
+                  {activeOfficialAlertsCount} зон
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
@@ -1507,25 +1549,25 @@ export default function HomePage() {
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
                 <span className="text-slate-400 block font-mono">ВІК ДАНИХ (LATENCY):</span>
                 <span className={'font-mono font-bold mt-0.5 block ' + (alertsDiagnostic.isStale ? 'text-amber-400' : 'text-emerald-400')}>
-                  {alertsDiagnostic.dataAgeSec !== undefined ? `${alertsDiagnostic.dataAgeSec} сек` : '< 8 сек'}
+                  {officialSnapshotAgeSec} сек
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ВАША ОБЛАСТЬ:</span>
+                <span className="text-slate-400 block font-mono">ВАША ТЕРИТОРІЯ:</span>
                 <span className="font-bold text-white truncate block mt-0.5">
                   {trustedLocation?.oblast || 'Визначається...'}
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">ТРИВОГА В ОБЛАСТІ:</span>
+                <span className="text-slate-400 block font-mono">ТРИВОГА ДЛЯ ВАС:</span>
                 <span className={'font-mono font-bold mt-0.5 block ' + (isUnderOfficialAlert ? 'text-rose-400' : 'text-emerald-400')}>
                   {isUnderOfficialAlert ? '🔴 АКТИВНА' : '🟢 ВІДСУТНЯ'}
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
-                <span className="text-slate-400 block font-mono">POLYGON MATCHED:</span>
-                <span className="font-mono font-bold text-emerald-400 mt-0.5 block">
-                  {activeOfficialAlertsCount > 0 ? 'YES (ТАК)' : 'WAITING'}
+                <span className="text-slate-400 block font-mono">MATCHED GEOMETRIES:</span>
+                <span className={'font-mono font-bold mt-0.5 block ' + (officialGeometryDiagnostic.unmatchedGeometryCount ? 'text-amber-400' : 'text-emerald-400')}>
+                  {officialGeometryDiagnostic.matchedGeometryCount}
                 </span>
               </div>
               <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
@@ -1534,7 +1576,45 @@ export default function HomePage() {
                   {mapUpdatedIso ? new Date(mapUpdatedIso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'СИНХРОНІЗОВАНО'}
                 </span>
               </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">UNMATCHED GEOMETRIES:</span>
+                <span className={'font-mono font-bold mt-0.5 block ' + (officialGeometryDiagnostic.unmatchedGeometryCount ? 'text-red-400' : 'text-emerald-400')}>
+                  {officialGeometryDiagnostic.unmatchedGeometryCount}
+                </span>
+              </div>
+              <div className="bg-black/40 p-2 rounded-xl border border-rose-950">
+                <span className="text-slate-400 block font-mono">RENDERED POLYGONS:</span>
+                <span className="font-mono font-bold text-cyan-300 mt-0.5 block">
+                  {officialGeometryDiagnostic.renderedGeometryCount}
+                </span>
+              </div>
             </div>
+
+            {officialGeometryDiagnostic.unmatched.length > 0 && (
+              <div className="p-2 rounded-xl bg-red-950/70 border border-red-800 space-y-1">
+                <p className="text-[10px] font-bold text-red-300">Незіставлені official zones:</p>
+                {officialGeometryDiagnostic.unmatched.map(zone => (
+                  <p key={`${zone.type}:${zone.sourceId}`} className="text-[10px] font-mono text-red-200">
+                    {zone.name} · {officialLocationTypeLabel(zone.type)} · ID {zone.sourceId}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {activeOfficialAlerts.length > 0 && (
+              <div className="max-h-44 overflow-y-auto rounded-xl border border-rose-950 bg-black/30 p-2 space-y-1">
+                <p className="text-[10px] font-bold text-slate-300">Активні зони source → geometry → map</p>
+                {activeOfficialAlerts.map(alert => {
+                  const match = officialGeometryDiagnostic.matches.find(item => item.sourceId === String(alert.location_uid) && item.type === alert.location_type);
+                  return (
+                    <div key={`${alert.location_type}:${alert.location_uid}`} className="grid grid-cols-[1fr_auto] gap-2 text-[9px] font-mono text-slate-300">
+                      <span className="truncate">{alert.location_title} · {officialLocationTypeLabel(alert.location_type)} · ID {alert.location_uid}</span>
+                      <span className={match?.matched ? 'text-emerald-400' : 'text-red-400'}>{match?.matched ? 'YES' : 'NO'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <p className="text-[10px] text-slate-400 leading-relaxed pt-1 border-t border-rose-950/80">
               * Офіційна сирена тривоги є фоновим інформаційним шаром і не переводить ваш локальний сектор у RED без виявлення тактичної рухомої цілі.
@@ -1618,8 +1698,8 @@ export default function HomePage() {
                 </span>
                 <div className="flex justify-between text-slate-300">
                   <span>Статус Alerts:</span>
-                  <span className={'font-mono font-bold ' + (alertsDiagnostic.status === 'OK' ? 'text-emerald-400' : alertsDiagnostic.status === 'CACHE' ? 'text-amber-400' : 'text-rose-400')}>
-                    {alertsDiagnostic.status === 'OK' ? 'OK (Онлайн)' : alertsDiagnostic.status === 'CACHE' ? 'CACHE' : 'ERROR'}
+                  <span className={'font-mono font-bold ' + (alertsDiagnostic.status === 'OK' ? 'text-emerald-400' : 'text-rose-400')}>
+                    {alertsDiagnostic.status === 'OK' ? 'OK (Онлайн)' : 'ERROR'}
                   </span>
                 </div>
                 <div className="flex justify-between text-slate-300">

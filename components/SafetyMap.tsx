@@ -2,8 +2,13 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ThreatEvent } from '@/lib/matcher';
-import { RawAlert } from '@/lib/sources/alertsInUa';
-import { UKRAINE_REGIONS_GEOJSON } from '@/lib/ukraineRegions';
+import { RawAlert, getActiveAirRaidAlerts } from '@/lib/sources/alertsInUa';
+import {
+  buildOfficialAlertsSvgOverlay,
+  EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC,
+  OFFICIAL_ALERTS_OVERLAY_BOUNDS,
+  OfficialAlertGeometryDiagnostic
+} from '@/lib/officialAlertGeometry';
 import {
   Navigation,
   ZoomIn,
@@ -56,6 +61,7 @@ interface SafetyMapProps {
   activeTab?: string;
   centerTrigger?: number;
   onMapUpdated?: (iso: string) => void;
+  onOfficialGeometryDiagnostic?: (diagnostic: OfficialAlertGeometryDiagnostic) => void;
 }
 
 // Helper to compute zoom level based on monitoring radius
@@ -117,7 +123,8 @@ export default function SafetyMap({
   isFullScreen = false,
   activeTab,
   centerTrigger,
-  onMapUpdated
+  onMapUpdated,
+  onOfficialGeometryDiagnostic
 }: SafetyMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -270,73 +277,50 @@ export default function SafetyMap({
     if (!isMapReady || !mapInstanceRef.current || !LRef.current) return;
     const L = LRef.current;
     const map = mapInstanceRef.current;
+    let cancelled = false;
 
     if (officialAlertsLayerRef.current) {
       map.removeLayer(officialAlertsLayerRef.current);
       officialAlertsLayerRef.current = null;
     }
 
-    if (!showOfficialAlerts) return;
+    const activeAlerts = getActiveAirRaidAlerts(officialAlerts);
+    if (!showOfficialAlerts || activeAlerts.length === 0) {
+      onOfficialGeometryDiagnostic?.(EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC);
+      onMapUpdated?.(new Date().toISOString());
+      return;
+    }
 
-    // Extract active alert locations
-    const activeAlerts = (officialAlerts || []).filter(a => !a.finished_at);
-
-    const geoJsonLayer = L.geoJSON(UKRAINE_REGIONS_GEOJSON as any, {
-      pane: 'officialAlertsPane',
-      style: (feature: any) => {
-        const regName = (feature.properties.name || '').toLowerCase().trim();
-        const normName = (feature.properties.normalizedName || '').toLowerCase().trim();
-        const stem = normName.replace(/(ська|цька|зька|а)$/i, '').trim();
-
-        const isAlertActive = activeAlerts.some(a => {
-          const title = (a.location_title || '').toLowerCase().trim();
-          const oblast = (a.location_oblast || '').toLowerCase().trim();
-
-          // Direct or substring match on title or oblast
-          if (title === regName || oblast === regName) return true;
-          if (title.includes(normName) || oblast.includes(normName)) return true;
-          if (stem.length >= 4 && (title.includes(stem) || oblast.includes(stem))) return true;
-
-          // Special case for Kyiv city ("м. Київ" or "Київ") matching Kyivska oblast
-          if (regName.includes('київ') && (title.includes('київ') || oblast.includes('київ'))) return true;
-
-          // Special case for Crimea / Sevastopol
-          if (regName.includes('крим') && (title.includes('крим') || oblast.includes('крим'))) return true;
-          if (regName.includes('севастополь') && (title.includes('севастополь') || oblast.includes('севастополь'))) return true;
-
-          return false;
+    void buildOfficialAlertsSvgOverlay(activeAlerts).then(({ svg, diagnostic }) => {
+      if (cancelled || !mapInstanceRef.current) return;
+      onOfficialGeometryDiagnostic?.(diagnostic);
+      if (svg) {
+        const overlay = L.svgOverlay(svg, OFFICIAL_ALERTS_OVERLAY_BOUNDS, {
+          pane: 'officialAlertsPane',
+          interactive: false,
+          opacity: 1
         });
-
-        if (isAlertActive) {
-          return {
-            fillColor: '#dc2626', // Vibrant crimson red
-            fillOpacity: 0.38,   // High-contrast, clearly visible tint on dark map
-            weight: 2.2,         // Visible solid outline
-            color: '#ef4444',    // Bright red contour
-            opacity: 0.95,       // Clear visible border
-            dashArray: ''        // Solid line for clean boundary visibility
-          };
-        }
-
-        return {
-          fillColor: 'transparent',
-          fillOpacity: 0,
-          weight: 0.6,
-          color: '#334155',
-          opacity: 0.18,
-          dashArray: '2, 4'
-        };
-      },
-      interactive: false
+        overlay.addTo(map);
+        officialAlertsLayerRef.current = overlay;
+      }
+      onMapUpdated?.(new Date().toISOString());
+    }).catch(() => {
+      if (cancelled) return;
+      onOfficialGeometryDiagnostic?.({
+        ...EMPTY_OFFICIAL_GEOMETRY_DIAGNOSTIC,
+        activeZoneCount: activeAlerts.length,
+        unmatchedGeometryCount: activeAlerts.length,
+        unmatched: activeAlerts.map(alert => ({
+          sourceId: String(alert.location_uid),
+          name: alert.location_title,
+          type: alert.location_type
+        }))
+      });
+      onMapUpdated?.(new Date().toISOString());
     });
 
-    geoJsonLayer.addTo(map);
-    officialAlertsLayerRef.current = geoJsonLayer;
-
-    if (onMapUpdated) {
-      onMapUpdated(new Date().toISOString());
-    }
-  }, [isMapReady, officialAlerts, showOfficialAlerts, onMapUpdated]);
+    return () => { cancelled = true; };
+  }, [isMapReady, officialAlerts, showOfficialAlerts, onMapUpdated, onOfficialGeometryDiagnostic]);
 
   // 3. Update User Position & Monitoring Radius Circle
   useEffect(() => {
@@ -573,7 +557,7 @@ export default function SafetyMap({
   const activeConfirmedThreatsCount = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'CONFIRMED_THREAT' || (t.isWithinRadius && t.requiresImmediateShelter))).length;
   const activeObservationsCount = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID' && (t.eventType === 'OBSERVATION' || !t.isWithinRadius)).length;
   const activeThreatsCount = threats.filter(t => t.status === 'active' && t.category !== 'ALL_CLEAR' && t.category !== 'GENERAL_AIR_RAID').length;
-  const activeOfficialAlertsCount = (officialAlerts || []).filter(a => !a.finished_at).length;
+  const activeOfficialAlertsCount = getActiveAirRaidAlerts(officialAlerts).length;
 
   return (
     <div className={'relative w-full rounded-3xl overflow-hidden border border-[#1a2538] bg-[#070b14] shadow-2xl transition-all ' + (isFullScreen ? 'h-full flex-1 flex flex-col min-h-[480px]' : '')}>
@@ -624,7 +608,7 @@ export default function SafetyMap({
           {showOfficialAlerts && activeOfficialAlertsCount > 0 && (
             <div className="bg-rose-950/85 backdrop-blur-md px-2 py-1 rounded-full border border-rose-800/60 shadow-md flex items-center gap-1 text-rose-300 text-[10px] font-bold">
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
-              <span>{activeOfficialAlertsCount} обл</span>
+              <span>{activeOfficialAlertsCount} зон</span>
             </div>
           )}
         </div>
