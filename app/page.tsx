@@ -2522,46 +2522,51 @@ export default function HomePage() {
             <p className="text-xs text-slate-400 mt-0.5">Керування захистом, сповіщеннями та джерелами</p>
           </div>
 
-          {/* 1. 🔔 СПОВІЩЕННЯ (NOTIFICATIONS — ON/OFF) */}
+          {/* 1. 🔔 СПОВІЩЕННЯ (NOTIFICATIONS) */}
           <div className="mb-3.5 p-4 bg-[#0a0f18] border border-[#1a2538] rounded-2xl shadow-md">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isWebPushSubscribed && !webPushNeedsSync ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-slate-800/60 text-slate-400 border border-slate-700/50'}`}>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  isWebPushSubscribed && !webPushNeedsSync
+                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    : webPushNeedsSync
+                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    : 'bg-slate-800/60 text-slate-400 border border-slate-700/50'
+                }`}>
                   <Bell className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold text-white truncate">Сповіщення</h3>
-                  <p className="text-xs text-slate-400 truncate">
-                    {isWebPushSubscribed && !webPushNeedsSync
-                      ? 'Отримувати тривоги на заблокований екран'
-                      : webPushNeedsSync
-                      ? 'Потрібна синхронізація з сервером'
-                      : 'Фонові сповіщення вимкнено'}
+                  <p className="text-xs truncate">
+                    {isWebPushSubscribed && !webPushNeedsSync ? (
+                      <span className="text-slate-400">Отримувати тривоги на заблокований екран</span>
+                    ) : webPushNeedsSync ? (
+                      <span className="text-amber-400 font-semibold flex items-center gap-1">
+                        <span>🟡</span> Потрібна увага
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">Фонові сповіщення вимкнено</span>
+                    )}
                   </p>
                 </div>
               </div>
 
-              {/* Action Button: ON / OFF / SYNC */}
-              <div className="shrink-0">
+              {/* Action / Status Badge */}
+              <div className="shrink-0 flex items-center gap-2">
                 {isWebPushSubscribed && !webPushNeedsSync ? (
-                  <button
-                    type="button"
-                    onClick={handleUnsubscribeWebPush}
-                    className="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-500/25 active:scale-95 transition-all"
-                    title="Натисніть, щоб вимкнути"
-                  >
+                  <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-sm">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>УВІМКНЕНО</span>
-                  </button>
+                    <span>🟢 Активні</span>
+                  </div>
                 ) : webPushNeedsSync ? (
                   <button
                     type="button"
                     disabled={isSubscribingPush}
                     onClick={handleReSyncWebPush}
-                    className="px-3.5 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 hover:bg-amber-500/25 active:scale-95 transition-all disabled:opacity-50"
+                    className="px-3.5 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 hover:bg-amber-500/30 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSubscribingPush ? 'animate-spin' : ''}`} />
-                    <span>СИНХРОНІЗУВАТИ</span>
+                    <span>Відновити сповіщення</span>
                   </button>
                 ) : (
                   <button
@@ -2571,7 +2576,7 @@ export default function HomePage() {
                     className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-50"
                   >
                     <Bell className="w-3.5 h-3.5" />
-                    <span>{isSubscribingPush ? 'УВІМКНЕННЯ...' : 'УВІМКНУТИ'}</span>
+                    <span>{isSubscribingPush ? 'Увімкнення...' : 'Увімкнути'}</span>
                   </button>
                 )}
               </div>
