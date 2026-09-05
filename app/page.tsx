@@ -237,6 +237,7 @@ export default function HomePage() {
 
   // $0 Notification Channels (Web Push + Telegram Bot)
   const [telegramChatId, setTelegramChatId] = useState<string>('');
+  const [hasBrowserSubscription, setHasBrowserSubscription] = useState<boolean>(false);
   const [isWebPushSubscribed, setIsWebPushSubscribed] = useState<boolean>(false);
   const [webPushNeedsSync, setWebPushNeedsSync] = useState<boolean>(false);
   const [isSubscribingPush, setIsSubscribingPush] = useState<boolean>(false);
@@ -494,15 +495,24 @@ export default function HomePage() {
           if ('Notification' in window && Notification.permission === 'granted') {
             reg.pushManager.getSubscription().then(async (existingSub) => {
               if (!existingSub) {
+                setHasBrowserSubscription(false);
                 setIsWebPushSubscribed(false);
                 setWebPushNeedsSync(false);
                 return;
               }
+              setHasBrowserSubscription(true);
               const validSub = await getOrCreateFreshSubscription(reg);
-              setWebPushNeedsSync(true);
-              await synchronizeWebPushRegistration(validSub);
+              const isSync = await synchronizeWebPushRegistration(validSub);
+              if (isSync) {
+                setIsWebPushSubscribed(true);
+                setWebPushNeedsSync(false);
+              } else {
+                setIsWebPushSubscribed(false);
+                setWebPushNeedsSync(true);
+              }
             }).catch((error) => {
               console.error('[WebPushSync] launch sync failed', error);
+              setHasBrowserSubscription(true);
               setIsWebPushSubscribed(false);
               setWebPushNeedsSync(true);
             });
@@ -681,8 +691,17 @@ export default function HomePage() {
   const synchronizeWebPushRegistration = async (sub: PushSubscription): Promise<boolean> => {
     const subscription = serializePushSubscription(sub);
     const deviceId = getOrCreateDeviceId();
+    const subscribeEndpoint = getBackendEndpoint('/api/device/subscribe-push');
     const statusUrl = getBackendEndpoint('/api/device/push-status') +
       `?deviceId=${encodeURIComponent(deviceId)}&endpoint=${encodeURIComponent(subscription.endpoint)}`;
+
+    if (!subscribeEndpoint) {
+      console.warn('[WebPushSync] No backend URL configured. Registration cannot be verified.');
+      setIsWebPushSubscribed(false);
+      setWebPushNeedsSync(true);
+      localStorage.removeItem('psa_web_push_subscribed');
+      return false;
+    }
 
     try {
       const statusResponse = await fetch(statusUrl, { cache: 'no-store' });
@@ -696,7 +715,7 @@ export default function HomePage() {
 
       setIsWebPushSubscribed(false);
       setWebPushNeedsSync(true);
-      const registerResponse = await fetch(getBackendEndpoint('/api/device/subscribe-push'), {
+      const registerResponse = await fetch(subscribeEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId, subscription })
@@ -785,13 +804,18 @@ export default function HomePage() {
       await navigator.serviceWorker.ready;
 
       const sub = await getOrCreateFreshSubscription(reg, false);
+      setHasBrowserSubscription(true);
 
       setNativeTestAlertNotice('⏳ Збереження підписки на захисному сервері...');
       const synchronized = await synchronizeWebPushRegistration(sub);
       if (synchronized) {
+        setIsWebPushSubscribed(true);
+        setWebPushNeedsSync(false);
         setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE ($0 VAPID)');
       } else {
-        throw new Error('Backend не підтвердив збереження підписки');
+        setIsWebPushSubscribed(false);
+        setWebPushNeedsSync(true);
+        setNativeTestAlertNotice('🟡 WEB PUSH NEEDS SYNC: backend did not confirm subscription');
       }
     } catch (e: any) {
       console.error('[WebPush]', e);
@@ -801,6 +825,52 @@ export default function HomePage() {
       setIsSubscribingPush(false);
       setTimeout(() => setNativeTestAlertNotice(''), 5000);
     }
+  };
+
+  const handleReSyncWebPush = async () => {
+    if (typeof window === 'undefined') return;
+    setIsSubscribingPush(true);
+    setNativeTestAlertNotice('⏳ Повторна реєстрація підписки на сервері...');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await getOrCreateFreshSubscription(reg, false);
+      setHasBrowserSubscription(true);
+      const synchronized = await synchronizeWebPushRegistration(sub);
+      if (synchronized) {
+        setIsWebPushSubscribed(true);
+        setWebPushNeedsSync(false);
+        setNativeTestAlertNotice('🟢 WEB PUSH ACTIVE');
+      } else {
+        setIsWebPushSubscribed(false);
+        setWebPushNeedsSync(true);
+        setNativeTestAlertNotice('🟡 WEB PUSH NEEDS SYNC: backend did not confirm subscription');
+      }
+    } catch (e: any) {
+      console.error('[WebPushReSync]', e);
+      setIsWebPushSubscribed(false);
+      setWebPushNeedsSync(true);
+      setNativeTestAlertNotice(`❌ Помилка: ${e.message || e}`);
+    } finally {
+      setIsSubscribingPush(false);
+      setTimeout(() => setNativeTestAlertNotice(''), 5000);
+    }
+  };
+
+  const handleUnsubscribeWebPush = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+    } catch (e) {
+      console.warn('[WebPushUnsub]', e);
+    }
+    setHasBrowserSubscription(false);
+    setIsWebPushSubscribed(false);
+    setWebPushNeedsSync(false);
+    localStorage.removeItem('psa_web_push_subscribed');
+    localStorage.removeItem('psa_subscribed_vapid_key');
+    setNativeTestAlertNotice('⚪ Підписку скинуто');
+    setTimeout(() => setNativeTestAlertNotice(''), 3000);
   };
 
   const handleSendTestThreatPush = async () => {
@@ -2402,7 +2472,7 @@ export default function HomePage() {
               <Sliders className="w-4 h-4 text-blue-400" />
               <span>Налаштування та керування системою</span>
             </h2>
-            <p className="text-[11px] text-slate-400">Фоновий захист, підпис $0/рік, геолокація, радіус та діагностика</p>
+            <p className="text-[11px] text-slate-400">Фоновий захист, геолокація, радіус та діагностика</p>
           </div>
 
           {/* 1. 🔔 ФОНОВІ СПОВІЩЕННЯ ($0 iOS 16.4+ WEB PUSH & LOCK SCREEN) */}
@@ -2417,18 +2487,20 @@ export default function HomePage() {
               <span className={'text-[10px] font-mono font-bold px-2 py-0.5 rounded border ' + (
                 isIosBrowser && !isPwaStandalone
                   ? 'bg-slate-900 text-slate-400 border-slate-700'
-                  : webPushNeedsSync || !isWebPushSubscribed
+                  : isWebPushSubscribed && !webPushNeedsSync
+                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
+                  : webPushNeedsSync
                   ? 'bg-amber-950/80 text-amber-300 border-amber-800'
-                  : 'bg-emerald-950/90 text-emerald-300 border-emerald-700 animate-pulse'
+                  : 'bg-slate-900 text-slate-400 border-slate-700'
               )}>
                 {isIosBrowser && !isPwaStandalone ? (
                   '⚪ ПОТРІБНО ВСТАНОВИТИ НА IPHONE'
+                ) : isWebPushSubscribed && !webPushNeedsSync ? (
+                  '🟢 WEB PUSH ACTIVE'
                 ) : webPushNeedsSync ? (
                   '🟡 WEB PUSH NEEDS SYNC'
-                ) : !isWebPushSubscribed ? (
-                  '🟡 СПОВІЩЕННЯ НЕ АКТИВОВАНІ'
                 ) : (
-                  '🟢 WEB PUSH ACTIVE'
+                  '⚪ WEB PUSH OFF'
                 )}
               </span>
             </div>
@@ -2450,8 +2522,37 @@ export default function HomePage() {
                   * Обмеження Apple iOS: Push API доступний виключно з Home Screen (iOS 16.4+).
                 </p>
               </div>
-            ) : !isWebPushSubscribed ? (
-              /* CASE B: PWA INSTALLED, BUT NOT SUBSCRIBED */
+            ) : webPushNeedsSync ? (
+              /* CASE B: BROWSER SUBSCRIPTION EXISTS, BUT BACKEND REGISTRATION FAILED */
+              <div className="p-3 bg-amber-950/40 rounded-xl border border-amber-800/80 space-y-2.5 text-xs text-amber-200">
+                <div className="flex items-center gap-2 font-bold text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Потрібна синхронізація з сервером (NEEDS SYNC)</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-snug">
+                  Браузерну Web Push підписку створено, але хмарний бекенд не підтвердив її реєстрацію (ACK). Натисніть кнопку нижче для повторної синхронізації:
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={isSubscribingPush}
+                    onClick={handleReSyncWebPush}
+                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={'w-3.5 h-3.5 ' + (isSubscribingPush ? 'animate-spin' : '')} />
+                    <span>{isSubscribingPush ? 'СИНХРОНІЗАЦІЯ...' : 'ПОВТОРИТИ СИНХРОНІЗАЦІЮ'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUnsubscribeWebPush}
+                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-all"
+                  >
+                    Скинути
+                  </button>
+                </div>
+              </div>
+            ) : !isWebPushSubscribed || !hasBrowserSubscription ? (
+              /* CASE C: NO SUBSCRIPTION */
               <div className="space-y-2.5">
                 <p className="text-[11px] text-slate-300 leading-snug">
                   Для отримання тривог при заблокованому iPhone увімкніть фонові Web Push сповіщення ($0 без Apple Dev Program):
@@ -2467,7 +2568,7 @@ export default function HomePage() {
                 </button>
               </div>
             ) : (
-              /* CASE C: REAL WEB PUSH ACTIVE -> TEST CONTROLS */
+              /* CASE D: REAL WEB PUSH ACTIVE -> TEST CONTROLS */
               <div className="space-y-3">
                 <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/80 rounded-xl flex items-center justify-between text-xs text-emerald-200">
                   <div className="flex items-center gap-2">
@@ -2635,13 +2736,29 @@ export default function HomePage() {
                 <span className="text-[8px] text-slate-500 truncate">Постійний HTTPS backend</span>
               </div>
 
-              {/* 4. LOCK SCREEN WEB PUSH */}
+              {/* 4. CURRENT WEB PUSH */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">LOCK SCREEN WEB PUSH:</span>
-                <span className="font-bold mt-0.5 text-emerald-400">
-                  🟢 VERIFIED
+                <span className="text-slate-400 text-[9px] font-mono">CURRENT WEB PUSH:</span>
+                <span className={'font-bold mt-0.5 ' + (
+                  isWebPushSubscribed && !webPushNeedsSync
+                    ? 'text-emerald-400'
+                    : webPushNeedsSync
+                    ? 'text-amber-400'
+                    : 'text-slate-400'
+                )}>
+                  {isWebPushSubscribed && !webPushNeedsSync
+                    ? '🟢 ACTIVE'
+                    : webPushNeedsSync
+                    ? '🟡 NEEDS SYNC'
+                    : '⚪ OFF'}
                 </span>
-                <span className="text-[8px] text-slate-500">iOS 16.4+ VAPID Push</span>
+                <span className="text-[8px] text-slate-500 truncate">
+                  {isWebPushSubscribed && !webPushNeedsSync
+                    ? 'Підтверджено бекендом'
+                    : webPushNeedsSync
+                    ? 'Очікує синхронізації'
+                    : 'Підписка відсутня'}
+                </span>
               </div>
 
               {/* 5. CRITICAL ALERTS */}
@@ -2653,15 +2770,38 @@ export default function HomePage() {
                 <span className="text-[8px] text-slate-500">Стандартний системний звук</span>
               </div>
 
-              {/* 6. CLOUD DELIVERY */}
+              {/* 6. TELEGRAM FALLBACK */}
               <div className="bg-black/60 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
-                <span className="text-slate-400 text-[9px] font-mono">CLOUD DELIVERY:</span>
-                <span className={'font-bold mt-0.5 ' + (cloudDeliveryStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-amber-400')}>
-                  {cloudDeliveryStatus === 'VERIFIED' ? '🟢 VERIFIED' : '🟡 WAITING FOR PHYSICAL TEST'}
+                <span className="text-slate-400 text-[9px] font-mono">TELEGRAM BOT:</span>
+                <span className={'font-bold mt-0.5 ' + (telegramChatId.trim().length > 0 ? 'text-emerald-400' : 'text-slate-400')}>
+                  {telegramChatId.trim().length > 0 ? '🟢 ACTIVE' : '⚪ NOT CONFIGURED'}
                 </span>
                 <span className="text-[8px] text-slate-500 truncate">
-                  {cloudDeliveryStatus === 'VERIFIED' ? 'Підтверджено на iPhone' : 'Очікує фінального тесту'}
+                  {telegramChatId.trim().length > 0 ? `Chat ID: ${telegramChatId}` : 'Резервний дублер'}
                 </span>
+              </div>
+            </div>
+
+            {/* HISTORICAL TESTS (Separate from current operational status) */}
+            <div className="pt-2 border-t border-slate-800/80">
+              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider block mb-1.5">
+                Історичні тести (не є поточним операційним станом):
+              </span>
+              <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                <div className="bg-black/40 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                  <span className="text-slate-400 text-[9px] font-mono">LAST LOCK SCREEN TEST:</span>
+                  <span className={'font-bold mt-0.5 ' + (lockScreenTestStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-slate-400')}>
+                    {lockScreenTestStatus === 'VERIFIED' ? '🟢 VERIFIED' : '⚪ NOT RUN'}
+                  </span>
+                  <span className="text-[8px] text-slate-500 truncate">Ручний тест на замкненому екрані</span>
+                </div>
+                <div className="bg-black/40 p-2 rounded-lg border border-slate-800 flex flex-col justify-between">
+                  <span className="text-slate-400 text-[9px] font-mono">LAST CLOUD DELIVERY TEST:</span>
+                  <span className={'font-bold mt-0.5 ' + (cloudDeliveryStatus === 'VERIFIED' ? 'text-emerald-400' : 'text-slate-400')}>
+                    {cloudDeliveryStatus === 'VERIFIED' ? '🟢 VERIFIED' : '⚪ NOT RUN'}
+                  </span>
+                  <span className="text-[8px] text-slate-500 truncate">Хмарне push-сповіщення</span>
+                </div>
               </div>
             </div>
 
@@ -2670,67 +2810,8 @@ export default function HomePage() {
             </p>
           </div>
 
-          {/* 2. 🔑 APP SIGNING & АВТО-ОНОВЛЕННЯ ($0 / YEAR APPLE COST) */}
-          <div className="mb-4 p-3.5 bg-[#090f14] border border-emerald-500/40 rounded-2xl space-y-3 shadow-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-emerald-300 flex items-center gap-1.5 uppercase tracking-wide">
-                <Lock className="w-4 h-4 text-emerald-400" />
-                <span>APP SIGNING & АВТО-ОНОВЛЕННЯ</span>
-              </span>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700">
-                🟡 PERSONAL TEAM — EXPIRES IN {signingHealth.daysRemaining} DAYS
-              </span>
-            </div>
 
-            {/* 3 ROWS REQUIRED: СТАТУС, ОСТАННЄ ОНОВЛЕННЯ, АВТО-ОНОВЛЕННЯ */}
-            <div className="space-y-1.5 text-[10px] bg-black/60 p-2.5 rounded-xl border border-slate-800 font-mono">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">СТАН ПІДПИСУ:</span>
-                <span className="font-bold text-amber-400">🟡 PERSONAL TEAM — EXPIRES IN {signingHealth.daysRemaining} DAYS</span>
-              </div>
-              <div className="flex justify-between items-center border-t border-slate-800/80 pt-1">
-                <span className="text-slate-400">ОСТАННЄ ОНОВЛЕННЯ:</span>
-                <span className="font-bold text-amber-300">Потрібен Sideload (Sideloadly / AltStore)</span>
-              </div>
-              <div className="flex justify-between items-center border-t border-slate-800/80 pt-1">
-                <span className="text-slate-400">АВТО-ОНОВЛЕННЯ:</span>
-                <span className="font-bold text-amber-300">🟡 SideStore / AltServer Required (Кожні 7 днів)</span>
-              </div>
-            </div>
-
-            {/* SIDESTORE & ALTSERVER FREE DETAILS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[9px] text-slate-300">
-              <div className="bg-[#070d12] p-2.5 rounded-xl border border-emerald-950 space-y-1">
-                <span className="font-bold text-emerald-400 flex items-center gap-1">
-                  <span>📱 SideStore (Без ПК)</span>
-                </span>
-                <p className="text-slate-400 leading-snug">
-                  Працює прямо на iPhone через локальний WireGuard VPN loopback (127.0.0.1). Автоматично оновлює 7-денний сертифікат по Wi-Fi без комп'ютера.
-                </p>
-              </div>
-              <div className="bg-[#070d12] p-2.5 rounded-xl border border-emerald-950 space-y-1">
-                <span className="font-bold text-cyan-400 flex items-center gap-1">
-                  <span>💻 AltServer (Wi-Fi Резерв)</span>
-                </span>
-                <p className="text-slate-400 leading-snug">
-                  Оновлює додаток фоново, коли iPhone та домашній ПК у спільній локальній Wi-Fi мережі. Жодних платіжних карток чи $99/рік Apple Dev Program.
-                </p>
-              </div>
-            </div>
-
-            {/* DOWNLOAD IPA BUTTON */}
-            <a
-              href="https://github.com/romanchuk82-ctrl/personal-safety-agent/releases/download/v1.0.0-ios/PersonalSafetyAgent.ipa"
-              target="_blank"
-              rel="noreferrer"
-              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98]"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>ЗАВАНТАЖИТИ PersonalSafetyAgent.ipa (Free Sideload)</span>
-            </a>
-          </div>
-
-          {/* 3. 📍 КЕРУВАННЯ ГЕОЛОКАЦІЄЮ (4 MODES: АВТО, ДІМ, РОБОТА, РУЧНА) */}
+          {/* 2. 📍 КЕРУВАННЯ ГЕОЛОКАЦІЄЮ (4 MODES: АВТО, ДІМ, РОБОТА, РУЧНА) */}
           <div className="mb-4 p-3.5 bg-[#0a0f18] border border-[#162032] rounded-2xl space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
