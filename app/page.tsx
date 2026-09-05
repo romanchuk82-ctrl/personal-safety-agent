@@ -511,6 +511,18 @@ export default function HomePage() {
     setTimeout(() => setLocationSuccessNotice(''), 3500);
   };
 
+  const getBackendEndpoint = (endpointPath: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return `http://localhost:3001${endpointPath}`;
+    }
+    const customUrl = localStorage.getItem('psa_backend_url');
+    if (customUrl) {
+      return `${customUrl.replace(/\/$/, '')}${endpointPath}`;
+    }
+    return null;
+  };
+
   const handleSubscribeWebPush = async () => {
     if (typeof window === 'undefined') return;
     try {
@@ -519,17 +531,20 @@ export default function HomePage() {
         if (perm === 'granted') {
           setIsWebPushSubscribed(true);
           setNativeTestAlertNotice('✓ Web Push успішно увімкнено ($0 VAPID)');
-          fetch('http://localhost:3001/api/device/subscribe-push', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              deviceId: 'web-client',
-              subscription: {
-                endpoint: 'https://fcm.googleapis.com/fcm/send/sample-token',
-                keys: { p256dh: 'test', auth: 'test' }
-              }
-            })
-          }).catch(() => {});
+          const url = getBackendEndpoint('/api/device/subscribe-push');
+          if (url) {
+            fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                deviceId: 'web-client',
+                subscription: {
+                  endpoint: 'https://fcm.googleapis.com/fcm/send/sample-token',
+                  keys: { p256dh: 'test', auth: 'test' }
+                }
+              })
+            }).catch(() => {});
+          }
         } else {
           setNativeTestAlertNotice('Дозвіл на сповіщення не надано');
         }
@@ -543,18 +558,23 @@ export default function HomePage() {
   const handleSaveTelegramChatId = async (id: string) => {
     setTelegramChatId(id);
     localStorage.setItem('psa_telegram_chat_id', id);
-    try {
-      await fetch('http://localhost:3001/api/device/register-telegram', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: 'web-client',
-          chatId: id.trim()
-        })
-      });
+    const url = getBackendEndpoint('/api/device/register-telegram');
+    if (url) {
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId: 'web-client',
+            chatId: id.trim()
+          })
+        });
+        setNativeTestAlertNotice(`✓ Telegram Chat ID збережено (${id})`);
+      } catch (e) {
+        setNativeTestAlertNotice(`✓ Telegram Chat ID збережено локально (${id})`);
+      }
+    } else {
       setNativeTestAlertNotice(`✓ Telegram Chat ID збережено (${id})`);
-    } catch (e) {
-      setNativeTestAlertNotice(`✓ Telegram Chat ID збережено локально (${id})`);
     }
     setTimeout(() => setNativeTestAlertNotice(''), 3500);
   };
@@ -594,17 +614,20 @@ export default function HomePage() {
       } catch (e) {}
     }
     
-    // Backend trigger
-    try {
-      await fetch('http://localhost:3001/api/alerts/test-channel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: 'ios-dev-client',
-          testType: type
-        })
-      });
-    } catch (e) {}
+    // Backend trigger if available
+    const url = getBackendEndpoint('/api/alerts/test-channel');
+    if (url) {
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId: 'ios-dev-client',
+            testType: type
+          })
+        });
+      } catch (e) {}
+    }
     
     setTestThreatLoading(false);
     setNativeTestAlertNotice(`🚨 ${titles[type]} надіслано через Web Push + Telegram!`);
@@ -612,13 +635,16 @@ export default function HomePage() {
   };
 
   const handleRefreshDrivingDiagnostics = async () => {
-    try {
-      const res = await fetch('http://localhost:3001/api/device/driving-diagnostics');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.summary) setDrivingDiagnostics(data.summary);
-      }
-    } catch (e) {}
+    const url = getBackendEndpoint('/api/device/driving-diagnostics');
+    if (url) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.summary) setDrivingDiagnostics(data.summary);
+        }
+      } catch (e) {}
+    }
     setNativeTestAlertNotice('✓ Діагностику поїздки оновлено');
     setTimeout(() => setNativeTestAlertNotice(''), 3000);
   };
